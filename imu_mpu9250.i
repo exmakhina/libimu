@@ -78,6 +78,36 @@ IMU_EXPORT int imu_mpu9250_read_gyr(struct imu * imu)
 	return res;
 }
 
+
+IMU_EXPORT int imu_mpu9250_tread_mag(struct imu * imu, uint8_t reg, uint8_t * buf, int count)
+{
+	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
+	// optimization, we're already set to read
+	imu->twrite(imu->ctx, I2C_SLV0_REG, (uint8_t[]){reg}, 1);
+	imu->twrite(imu->ctx, I2C_SLV0_CTRL, (uint8_t[]){0x80 | count}, 1);
+	imu->sleep(imu->ctx, (imu_abstime_t)100000000 * count);
+	imu->tread(imu->ctx, EXT_SENS_DATA_00, buf, count);
+	return 0;
+}
+
+IMU_EXPORT int imu_mpu9250_twrite_mag(struct imu * imu, uint8_t reg, uint8_t * buf, int count)
+{
+	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
+	// set to write
+	imu->twrite(imu->ctx, I2C_SLV0_ADDR, (uint8_t[]){AK8963_ADDRESS}, 1);
+
+	imu->twrite(imu->ctx, I2C_SLV0_REG, (uint8_t[]){reg}, 1);
+	imu->twrite(imu->ctx, I2C_SLV0_DO, (uint8_t[]){reg}, 1);
+	imu->twrite(imu->ctx, I2C_SLV0_CTRL, (uint8_t[]){0x80 | count}, 1);
+
+	// go back to read mode
+	imu->twrite(imu->ctx, I2C_SLV0_ADDR, (uint8_t[]){AK8963_ADDRESS | (1<<7)}, 1);
+
+	//TODO readback?
+	return 0;
+}
+
+
 IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 {
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
@@ -105,18 +135,9 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
 	int res;
 
-
-	// wake up device
-	// Clear sleep mode bit (6), enable all sensors
-	imu->twrite(imu->ctx, PWR_MGMT_1, (uint8_t[]){0x00}, 1);
-
-
-	imu->sleep(imu->ctx, 100000000);
-	// Delay 100 ms for PLL to get established on x-axis gyro; should check for PLL ready interrupt
-
 	// Check "who am I"
+	uint8_t val = 0;
 	{
-		uint8_t val = 0;
 		res = imu->tread(imu->ctx, WHO_AM_I_MPU9250, &val, 1);
 		if (res != 0) {
 			return -2;
@@ -126,6 +147,24 @@ static int imu_mpu9250_initialize(struct imu * imu)
 		}
 	}
 
+	val = 0;
+	imu_mpu9250_twrite_mag(imu, AK8963_CNTL2, &val, 1);
+
+	// wake up device
+	// Clear sleep mode bit (6), enable all sensors
+	imu->twrite(imu->ctx, PWR_MGMT_1, (uint8_t[]){0x00}, 1);
+
+	imu->sleep(imu->ctx, 100000000);
+	// Delay 100 ms for PLL to get established on x-axis gyro; should check for PLL ready interrupt
+
+	val = (1<<1); // I2C master pins bypass mode if disabled
+	imu->twrite(imu->ctx, INT_PIN_CFG, &val, 1);
+
+	val = (1<<4) /* I2C_IF_DIS */ | (1<<0) /* SIG_COND_RST */;
+	imu->twrite(imu->ctx, USER_CTRL, &val, 1);
+
+	val = 1<<0;
+	imu_mpu9250_twrite_mag(imu, AK8963_CNTL2, &val, 1);
 
 	// get stable time source
 	imu->twrite(imu->ctx, PWR_MGMT_1, (uint8_t[]){0x01}, 1);
@@ -174,6 +213,48 @@ static int imu_mpu9250_initialize(struct imu * imu)
 		imu->twrite(imu->ctx, reg, &val, 1);
 	}
 
+
+	{
+		/*
+		  Configure the magnetometer.
+		  Here, using the I2C master interface.
+		 */
+		// Enable I2C master
+		uint8_t val;
+
+		val = (1<<5) /* I2C_MST_EN */;
+		//val |= (1<<4) /* Disable I2C slave (TODO?) */;
+		//val |= (1<<1) /* I2C_MST_RST */;
+		imu->twrite(imu->ctx, USER_CTRL, &val, 1);
+
+		imu->sleep(imu->ctx, (imu_abstime_t)100000000);
+
+		val = 0 /* | (1<<6) !WAIT_FOR_ES */ | 0xd /* 400 kHz */;
+		imu->twrite(imu->ctx, I2C_MST_CTRL, &val, 1);
+
+		val = AK8963_ADDRESS | (1<<7); // Enable read
+		imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, 1);
+
+		{
+			uint8_t val;
+			imu_mpu9250_tread_mag(imu, WHO_AM_I_AK8963, &val, 1);
+			if (val != 0x48) {
+				printf("pouet %d\n", val);
+				return -3;
+			}
+		}
+
+		imu_mpu9250_twrite_mag(imu, AK8963_CNTL2, (uint8_t[]){0x01}, 1);
+		imu_mpu9250_twrite_mag(imu, AK8963_CNTL1, (uint8_t[]){0x11}, 1);
+
+		val = AK8963_ADDRESS | (1<<7); // Enable read
+		imu->twrite(imu->ctx, I2C_SLV0_ADDR, (uint8_t[]){(1<<7) | AK8963_ADDRESS}, 1);
+		imu->twrite(imu->ctx, I2C_SLV0_REG, (uint8_t[]){AK8963_ST1}, 1);
+		imu->twrite(imu->ctx, I2C_SLV0_CTRL, (uint8_t[]){0x88}, 1);
+
+		//imu->twrite(imu->ctx, I2C_MST_DELAY_CTRL, (uint8_t[]){0x81}, 1);
+
+	}
 	// The accelerometer, gyro, and thermometer are set to 1 kHz sample rates,
 	// but all these rates are further reduced by a factor of 5 to 200 Hz because of the SMPLRT_DIV setting
 
