@@ -54,7 +54,7 @@ int main(void)
 
 	imu_fake_init(imu);
 
-	res = imu->poll(imu, 1<<IMU_READ_ACCEL);
+	res = imu->poll(imu, 1<<IMU_READ_ACC);
 
 	float ax, ay, az;
 	imu_abstime_t t;

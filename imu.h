@@ -20,6 +20,9 @@ extern "C" {
 #define PRIimuabstime PRIi64
 #endif
 
+#if !defined(BIT)
+#define BIT(x) (1<<(x))
+#endif
 
 typedef void * imu_ctx_t;
 
@@ -42,9 +45,9 @@ typedef int (imu_init_t)(struct imu * imu);
 
 
 enum imu_read_bits {
-	IMU_READ_ACCEL = 0, //! Accelerometer / gravity
-	IMU_READ_GYRO, //! Gyroscope / angular rate
-	IMU_READ_MAGN, //! Magnetometer / magnetic field orientation
+	IMU_READ_ACC = 0, //! Accelerometer / gravity
+	IMU_READ_GYR, //! Gyroscope / angular rate
+	IMU_READ_MAG, //! Magnetometer / magnetic field orientation
 };
 
 /*! Read sensor
@@ -72,7 +75,7 @@ struct imu {
 	imu_ctx_t ctx;
 
 	//! \name OS functions to be provided
-	//! \{ 
+	//! \{
 
 	//! Request to sleep
 	imut_sleep_t * sleep;

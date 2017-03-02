@@ -44,7 +44,7 @@ IMU_EXPORT int imu_fake_init(struct imu * imu)
 {
 	struct imu_fake * fake = (struct imu_fake*)imu;
 	printf("Fake init\n");
-	
+
 	imu->poll = &imu_read;
 	imu->get_acc = &imu_get_acc;
 	imu->get_gyr = &imu_get_gyr;
