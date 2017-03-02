@@ -4,12 +4,15 @@
 def options(opt):
 	opt.load("compiler_c")
 	opt.add_option("--build-fake", action="store_true", default=False)
+	opt.add_option("--build-mpu9250", action="store_true", default=False)
 
 
 def configure(conf):
 	conf.load("compiler_c")
 	if conf.options.build_fake:
 		conf.env.BUILD_FAKE = True
+	if conf.options.build_mpu9250:
+		conf.env.BUILD_MPU9250 = True
 
 def build(bld):
 	bld.install_files(
@@ -38,3 +41,19 @@ def build(bld):
 		 includes=[bld.path.abspath()],
 		 source="imu_fake_test.c",
 		)
+
+	if bld.env.BUILD_MPU9250:
+		bld.install_files(
+		 "${PREFIX}/include/libimu",
+		 [
+		  "imu_mpu9250.h",
+		  "imu_mpu9250.i",
+		 ],
+		)
+		bld(
+		 target="imu_mpu9250",
+		 features="c cshlib",
+		 includes=[bld.path.abspath()],
+		 source="imu_mpu9250.c",
+		)
+
