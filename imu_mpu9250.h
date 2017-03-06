@@ -85,10 +85,11 @@ IMU_EXPORT int imu_mpu9250_init(struct imu * imu);
    From MPU-9250 Register Map and Descriptions
 */
 
+
+#define MPU9250_ADDRESS  0x68 // PS-MPU-9250A-01 §7.2 I2C Interface
+#define AK8963_ADDRESS   0x0C // PS-MPU-9250A-01 /0x0c/
+
 //Magnetometer Registers
-
-#define AK8963_ADDRESS   0x0C
-
 #define WHO_AM_I_AK8963  0x00 // should return 0x48
 #define INFO             0x01
 #define AK8963_ST1       0x02  // data ready status bit 0
@@ -236,7 +237,6 @@ IMU_EXPORT int imu_mpu9250_init(struct imu * imu);
 #define ZA_OFFSET_H      0x7D
 #define ZA_OFFSET_L      0x7E
 
-#define MPU9250_ADDRESS 0x68
 
 
 #if defined(__cplusplus)
