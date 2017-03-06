@@ -229,56 +229,75 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	  Prepare communication with magnetometer
 	 */
 	{
-		/*
-		  Configure the magnetometer.
-		  Here, using the I2C master interface.
-		 */
-		// Enable I2C master
-		uint8_t val;
+		val = 0;
+		//val |= BIT(0); /* enable raw data ready interrupt only */
+		imu->twrite(imu->ctx, INT_ENABLE, &val, 1);
 
-		val = (1<<5) /* I2C_MST_EN */;
-		//val |= (1<<4) /* Disable I2C slave (TODO?) */;
-		//val |= (1<<1) /* I2C_MST_RST */;
+		imu->tread(imu->ctx, INT_STATUS, &val, 1);
+		imu->tread(imu->ctx, INT_STATUS, &val, 1);
+		if (val != 0) {
+			fprintf(stderr, "Why isn't INT_STATUS 0 after 2 reads (%2x)?\n", val);
+			return -3;
+		}
+
+		// Enable I2C master
+
+		val = 0;
+		val |= BIT(5); /* I2C_MST_EN */
+		val |= BIT(4); /* Disable I2C slave (TODO?) */
+		val |= BIT(1); /* I2C_MST_RST */
 		imu->twrite(imu->ctx, USER_CTRL, &val, 1);
 
 		imu->sleep(imu->ctx, (imu_abstime_t)100000000);
 
-		val = 0 /* | (1<<6) !WAIT_FOR_ES */ | 0xd /* 400 kHz */;
+		val = 0;
+		val |= BIT(6); /* WAIT_FOR_ES */
+		val |= 13; /* 400 kHz */
 		imu->twrite(imu->ctx, I2C_MST_CTRL, &val, 1);
 
-		val = AK8963_ADDRESS | (1<<7); // Enable read
+		/*
+		  Enable read of slave, by default.
+		  Writes are occasional and the write operation should reset
+		  I2C_SLV0_ADDR for a read.
+		*/
+		val = AK8963_ADDRESS | BIT(7);
 		imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, 1);
 
 		{
-			uint8_t val;
 			imu_mpu9250_tread_mag(imu, WHO_AM_I_AK8963, &val, 1);
 			if (val != 0x48) {
 				printf("pouet %d\n", val);
 				return -3;
 			}
 		}
+	}
 
-		imu_mpu9250_twrite_mag(imu, AK8963_CNTL2, (uint8_t[]){0x01}, 1);
-		imu_mpu9250_twrite_mag(imu, AK8963_CNTL1, (uint8_t[]){0x11}, 1);
 
-		val = AK8963_ADDRESS | (1<<7); // Enable read
-		imu->twrite(imu->ctx, I2C_SLV0_ADDR, (uint8_t[]){(1<<7) | AK8963_ADDRESS}, 1);
-		imu->twrite(imu->ctx, I2C_SLV0_REG, (uint8_t[]){AK8963_ST1}, 1);
-		imu->twrite(imu->ctx, I2C_SLV0_CTRL, (uint8_t[]){0x88}, 1);
+	{
+		/*
+		  Configure the magnetometer.
+		 */
+
+		val = BIT(0);
+		imu_mpu9250_twrite_mag(imu, AK8963_CNTL2, &val, sizeof(val));
+
+		val = BIT(4)|BIT(0);
+		imu_mpu9250_twrite_mag(imu, AK8963_CNTL1, &val, sizeof(val));
+
+		val = AK8963_ADDRESS | BIT(7); // Enable read
+		imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, sizeof(val));
+
+		val = AK8963_ST1;
+		imu->twrite(imu->ctx, I2C_SLV0_REG, &val, sizeof(val));
+
+		val = 0x88;
+		imu->twrite(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
 
 		//imu->twrite(imu->ctx, I2C_MST_DELAY_CTRL, (uint8_t[]){0x81}, 1);
 
 	}
 	// The accelerometer, gyro, and thermometer are set to 1 kHz sample rates,
 	// but all these rates are further reduced by a factor of 5 to 200 Hz because of the SMPLRT_DIV setting
-
-	{
-		// Configure Interrupts and Bypass Enable
-		// Set interrupt pin active high, push-pull, and clear on read of INT_STATUS, enable I2C_BYPASS_EN so additional chips
-		// can join the I2C bus and all can be controlled by the Arduino as master
-		imu->twrite(imu->ctx, INT_PIN_CFG, (uint8_t[]){0x22}, 1);
-		imu->twrite(imu->ctx, INT_ENABLE, (uint8_t[]){0x01}, 1);  // Enable data ready (bit 0) interrupt
-	}
 
 
 	{
