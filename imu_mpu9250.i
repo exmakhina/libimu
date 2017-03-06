@@ -1,3 +1,13 @@
+/*!
+  \file
+  \brief Implementation of MPU-9250 transport
+
+  TODO:
+  - Make on-board I2C master interface work
+  - Support I2C bypass too
+
+*/
+
 #include <math.h>
 #include <errno.h>
 
