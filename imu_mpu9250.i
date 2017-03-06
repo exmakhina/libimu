@@ -68,7 +68,7 @@ IMU_EXPORT int imu_mpu9250_read_acc(struct imu * imu)
 	int res;
 
 	uint8_t rawData[6];
-	res = imu->tread(imu->ctx, ACCEL_XOUT_H, &rawData[0], 6);
+	res = imu->tread(imu->ctx, ACCEL_XOUT_H, &rawData[0], sizeof(rawData));
 	self->acc_data[0] = ((int16_t)rawData[0] << 8) | rawData[1];
 	self->acc_data[1] = ((int16_t)rawData[2] << 8) | rawData[3];
 	self->acc_data[2] = ((int16_t)rawData[4] << 8) | rawData[5];
@@ -81,7 +81,7 @@ IMU_EXPORT int imu_mpu9250_read_gyr(struct imu * imu)
 	int res;
 
 	uint8_t rawData[6];
-	res = imu->tread(imu->ctx, GYRO_XOUT_H, &rawData[0], 6);
+	res = imu->tread(imu->ctx, GYRO_XOUT_H, &rawData[0], sizeof(rawData));
 	self->gyr_data[0] = ((int16_t)rawData[0] << 8) | rawData[1];
 	self->gyr_data[1] = ((int16_t)rawData[2] << 8) | rawData[3];
 	self->gyr_data[2] = ((int16_t)rawData[4] << 8) | rawData[5];
@@ -89,7 +89,8 @@ IMU_EXPORT int imu_mpu9250_read_gyr(struct imu * imu)
 }
 
 
-IMU_EXPORT int imu_mpu9250_tread_mag(struct imu * imu, uint8_t reg, uint8_t * buf, int count)
+IMU_EXPORT int imu_mpu9250_tread_mag(struct imu * imu,
+ uint8_t reg, uint8_t * buf, int count)
 {
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
 	// optimization, we're already set to read
@@ -100,18 +101,19 @@ IMU_EXPORT int imu_mpu9250_tread_mag(struct imu * imu, uint8_t reg, uint8_t * bu
 	return 0;
 }
 
-IMU_EXPORT int imu_mpu9250_twrite_mag(struct imu * imu, uint8_t reg, uint8_t * buf, int count)
+IMU_EXPORT int imu_mpu9250_twrite_mag(struct imu * imu,
+ uint8_t reg, uint8_t * buf, int count)
 {
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
 	// set to write
 	imu->twrite(imu->ctx, I2C_SLV0_ADDR, (uint8_t[]){AK8963_ADDRESS}, 1);
 
 	imu->twrite(imu->ctx, I2C_SLV0_REG, (uint8_t[]){reg}, 1);
-	imu->twrite(imu->ctx, I2C_SLV0_DO, (uint8_t[]){reg}, 1);
+	imu->twrite(imu->ctx, I2C_SLV0_DO, &buf[0], 1);
 	imu->twrite(imu->ctx, I2C_SLV0_CTRL, (uint8_t[]){0x80 | count}, 1);
 
 	// go back to read mode
-	imu->twrite(imu->ctx, I2C_SLV0_ADDR, (uint8_t[]){AK8963_ADDRESS | (1<<7)}, 1);
+	imu->twrite(imu->ctx, I2C_SLV0_ADDR, (uint8_t[]){AK8963_ADDRESS | BIT(7)}, 1);
 
 	//TODO readback?
 	return 0;
@@ -167,13 +169,13 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	imu->sleep(imu->ctx, 100000000);
 	// Delay 100 ms for PLL to get established on x-axis gyro; should check for PLL ready interrupt
 
-	val = (1<<1); // I2C master pins bypass mode if disabled
+	val = BIT(5)|BIT(1); // I2C master pins bypass mode if disabled
 	imu->twrite(imu->ctx, INT_PIN_CFG, &val, 1);
 
-	val = (1<<4) /* I2C_IF_DIS */ | (1<<0) /* SIG_COND_RST */;
+	val = BIT(4) /* I2C_IF_DIS */ | BIT(0) /* SIG_COND_RST */;
 	imu->twrite(imu->ctx, USER_CTRL, &val, 1);
 
-	val = 1<<0;
+	val = BIT(0);
 	imu_mpu9250_twrite_mag(imu, AK8963_CNTL2, &val, 1);
 
 	// get stable time source
@@ -223,7 +225,9 @@ static int imu_mpu9250_initialize(struct imu * imu)
 		imu->twrite(imu->ctx, reg, &val, 1);
 	}
 
-
+	/*
+	  Prepare communication with magnetometer
+	 */
 	{
 		/*
 		  Configure the magnetometer.
