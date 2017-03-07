@@ -102,27 +102,73 @@ IMU_EXPORT int imu_mpu9250_tread_mag(struct imu * imu,
  uint8_t reg, uint8_t * buf, int count)
 {
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
-	// optimization, we're already set to read
-	imu->twrite(imu->ctx, I2C_SLV0_REG, (uint8_t[]){reg}, 1);
-	imu->twrite(imu->ctx, I2C_SLV0_CTRL, (uint8_t[]){0x80 | count}, 1);
-	imu->sleep(imu->ctx, (imu_abstime_t)100000000 * count);
-	imu->tread(imu->ctx, EXT_SENS_DATA_00, buf, count);
-	return 0;
+	int res;
+	uint8_t val;
+
+	/* Note that we're already set to read */
+
+#if !defined(IMU_MPU9250_MAGACCESS_OPTIMIZED)
+	val = AK8963_ADDRESS | BIT(7);
+	imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, 1);
+#endif
+
+#if defined(IMU_MPU9250_MAGREAD_OPTIMIZED)
+	/* clear read interrupt, will use it to know when data is ready*/
+	imu->tread(imu->ctx, INT_STATUS, &val, sizeof(val));
+#endif
+
+	imu->twrite(imu->ctx, I2C_SLV0_REG, &reg, sizeof(reg));
+
+	val = 0x80 | count;
+	imu->twrite(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
+
+#if defined(IMU_MPU9250_MAGREAD_OPTIMIZED)
+	do {
+		imu->tread(imu->ctx, INT_STATUS, &val, sizeof(val));
+		if ((val & BIT(0)) == 0) {
+			break;
+		}
+	} while (1);
+#else
+	imu->sleep(imu->ctx, (imu_abstime_t)1000000 * count);
+#endif
+
+	//for (int i = 0; i < 10; i++) {
+	//	imu->sleep(imu->ctx, (imu_abstime_t)100000000 * count);
+	//}
+	res = imu->tread(imu->ctx, EXT_SENS_DATA_00, buf, count);
+
+	val = 0;
+	imu->twrite(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
+
+	imu->tread(imu->ctx, I2C_SLV0_ADDR, &val, sizeof(val));
+	imu->tread(imu->ctx, I2C_SLV0_REG, &val, sizeof(val));
+	imu->tread(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
+
+	//imu->sleep(imu, 100000000);
+
+	return res;
 }
 
 IMU_EXPORT int imu_mpu9250_twrite_mag(struct imu * imu,
  uint8_t reg, uint8_t * buf, int count)
 {
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
+	uint8_t val;
+
 	// set to write
-	imu->twrite(imu->ctx, I2C_SLV0_ADDR, (uint8_t[]){AK8963_ADDRESS}, 1);
-
-	imu->twrite(imu->ctx, I2C_SLV0_REG, (uint8_t[]){reg}, 1);
+	val = AK8963_ADDRESS;
+	imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, sizeof(val));
+	imu->twrite(imu->ctx, I2C_SLV0_REG, &reg, sizeof(reg));
 	imu->twrite(imu->ctx, I2C_SLV0_DO, &buf[0], 1);
-	imu->twrite(imu->ctx, I2C_SLV0_CTRL, (uint8_t[]){0x80 | count}, 1);
+	val = 0x80 | count;
+	imu->twrite(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
 
+#if defined(IMU_MPU9250_MAGACCESS_OPTIMIZED)
 	// go back to read mode
-	imu->twrite(imu->ctx, I2C_SLV0_ADDR, (uint8_t[]){AK8963_ADDRESS | BIT(7)}, 1);
+	val = AK8963_ADDRESS | BIT(7);
+	imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, sizeof(val));
+#endif
 
 	//TODO readback?
 	return 0;
@@ -132,8 +178,39 @@ IMU_EXPORT int imu_mpu9250_twrite_mag(struct imu * imu,
 IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 {
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
-	int res = -ENOSYS;
-	return res;
+	int res = 0;
+
+	do {
+		uint8_t val;
+		imu_mpu9250_tread_mag(imu, AK8963_ST1, &val, sizeof(val));
+		if ((val & BIT(0)) == 0) {
+			printf("Mag data not ready yet\n");
+			//continue;
+		}
+		break;
+	} while (1);
+
+	uint8_t rawData[7];
+	// must read ST2 at end of data acquisition
+	imu_mpu9250_tread_mag(imu, 0x03, &rawData[0], sizeof(rawData));
+
+	uint8_t st2 = rawData[6]; /* check for overflow */
+#if 1
+	if ((st2 & BIT(4)) == 0) {
+		fprintf(stderr, "Invalid st2 register contents (0x%02x), expecting 16-bit config\n", st2);
+		return -1;
+	}
+#endif
+	if ((st2 & BIT(3)) != 0) {
+		fprintf(stderr, "Magnetic field overflow\n");
+		return -2;
+	}
+
+	self->mag_data[0] = (int16_t)(((int16_t)rawData[1] << 8) | rawData[0]);
+	self->mag_data[1] = (int16_t)(((int16_t)rawData[3] << 8) | rawData[2]);
+	self->mag_data[2] = (int16_t)(((int16_t)rawData[5] << 8) | rawData[4]);
+
+	return 0;
 }
 
 int16_t imu_mpu9250_read_temp(struct imu_mpu9250 * self)
@@ -156,10 +233,10 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
 	int res;
 
-	// Check "who am I"
+	printf("Check who am I\n");
 	uint8_t val = 0;
 	{
-		res = imu->tread(imu->ctx, WHO_AM_I_MPU9250, &val, 1);
+		res = imu->tread(imu->ctx, WHO_AM_I_MPU9250, &val, sizeof(val));
 		if (res != 0) {
 			return -2;
 		}
@@ -168,102 +245,132 @@ static int imu_mpu9250_initialize(struct imu * imu)
 		}
 	}
 
+	printf("Wake up device, reset everything\n");
+	val = BIT(7);
+	imu->twrite(imu->ctx, PWR_MGMT_1, &val, sizeof(val));
+
+	/* default value is fine */
+	//val = BIT(0);
+	//imu->twrite(imu->ctx, PWR_MGMT_1, &val, sizeof(val));
+
 	val = 0;
-	imu_mpu9250_twrite_mag(imu, AK8963_CNTL2, &val, 1);
+	imu->twrite(imu->ctx, PWR_MGMT_2, &val, sizeof(val));
 
-	// wake up device
-	// Clear sleep mode bit (6), enable all sensors
-	imu->twrite(imu->ctx, PWR_MGMT_1, (uint8_t[]){0x00}, 1);
+	printf("Enable interrupts for raw data only\n");
+	val = 0;
+	val |= BIT(0); /* enable raw data ready interrupt only */
+	imu->twrite(imu->ctx, INT_ENABLE, &val, 1);
 
-	imu->sleep(imu->ctx, 100000000);
-	// Delay 100 ms for PLL to get established on x-axis gyro; should check for PLL ready interrupt
-
-	val = BIT(5)|BIT(1); // I2C master pins bypass mode if disabled
-	imu->twrite(imu->ctx, INT_PIN_CFG, &val, 1);
-
-	val = BIT(4) /* I2C_IF_DIS */ | BIT(0) /* SIG_COND_RST */;
-	imu->twrite(imu->ctx, USER_CTRL, &val, 1);
-
-	val = BIT(0);
-	imu_mpu9250_twrite_mag(imu, AK8963_CNTL2, &val, 1);
-
-	// get stable time source
-	imu->twrite(imu->ctx, PWR_MGMT_1, (uint8_t[]){0x01}, 1);
-	// Set clock source to be PLL with x-axis gyroscope reference, bits 2:0 = 001
-
-
-	// Configure Gyro and Accelerometer
-	// Disable FSYNC and set accelerometer and gyro bandwidth to 44 and 42 Hz, respectively;
-	// DLPF_CFG = bits 2:0 = 010; this sets the sample rate at 1 kHz for both
-	// Maximum delay is 4.9 ms which is just over a 200 Hz maximum rate
-	imu->twrite(imu->ctx, CONFIG, (uint8_t[]){0x03}, 1);
-
-	// Set sample rate = gyroscope output rate/(1 + SMPLRT_DIV)
-	// Use a 200 Hz rate; the same rate set in CONFIG above
-	imu->twrite(imu->ctx, SMPLRT_DIV, (uint8_t[]){0x04}, 1);
-
-	{
-		// Set gyroscope full scale range
-		// Range selects FS_SEL and AFS_SEL are 0 - 3, so 2-bit values are left-shifted into positions 4:3
-		uint8_t reg = GYRO_CONFIG;
-		uint8_t c;
-		imu->tread(imu->ctx, reg, &c, 1);
-		c = c & ~ (BIT(7) | BIT(6) | BIT(5)); // Clear self-test bits [7:5]
-		c = c & ~ (BIT(4) | BIT(3)); // Clear AFS bits [4:3]
-		c = c | (self->Gscale << 3); // Configure gyro range
-		imu->twrite(imu->ctx, GYRO_CONFIG, &c, 1);
+	/*
+	   Wait for something curious to clear...
+	*/
+	for (int i = 0; i < 100; i++) {
+		imu->tread(imu->ctx, INT_STATUS, &val, sizeof(val));
+		if (val != 0) {
+			fprintf(stderr, "INT_STATUS (%2x)?\n", val);
+		}
+		if ((val & BIT(2)) == 0) {
+			break;
+		}
 	}
 
-	{
-		// Set accelerometer configuration
-		uint8_t reg = ACCEL_CONFIG;
-		uint8_t val;
-		imu->tread(imu->ctx, reg, &val, 1);
-		val = val & ~(BIT(7)|BIT(6)|BIT(5));// Clear self-test bits [7:5]
-		val = val & ~(BIT(4)|BIT(3));// Clear AFS bits [4:3]
-		val = val | (self->Ascale <<3);// Set full scale range for the accelerometer
-		imu->twrite(imu->ctx, reg, &val, 1);
 
-		// Set accelerometer sample rate configuration
-		// It is possible to get a 4 kHz sample rate from the accelerometer by choosing 1 for
-		// accel_fchoice_b bit [3]; in this case the bandwidth is 1.13 kHz
-		reg = ACCEL_CONFIG2;
-		imu->tread(imu->ctx, reg, &val, 1);
-		val = val & ~(BIT(3) | BIT(2)|BIT(1)|BIT(0)); // Clear accel_fchoice_b (bit 3) and A_DLPFG (bits [2:0])
-		val = val | 0x03; // Set accelerometer rate to 1 kHz and bandwidth to 41 Hz
-		imu->twrite(imu->ctx, reg, &val, 1);
+	/*
+	  Note: in SPI with I2C master proxy,
+	  BYPASS_EN does *not* seem to be mandatory,
+	  but we set it nevertheless.
+	 */
+	val = 0;
+	val |= BIT(5); /* LATCH_INT_EN */
+	val |= BIT(1); /* I2C master pins bypass mode if disabled */
+	imu->twrite(imu->ctx, INT_PIN_CFG, &val, sizeof(val));
+
+	printf("Configure internal clock as we don't care about DMP\n");
+	/* Ref: PS § 4.1 clocking / RM § 4.34 Register 107 – Power Management 1*/
+	val = 1; /* internal clock */
+	imu->twrite(imu->ctx, PWR_MGMT_1, &val, sizeof(val));
+
+	printf("Configure Gyro\n");
+	/*
+	  Ref: RS § 4.5 Register 26 – Configuration
+	  - DLPF_CFG: don't care, we'll use the maximum available rate
+	*/
+	val = 0;
+	imu->twrite(imu->ctx, CONFIG, &val, sizeof(val));
+
+	/*
+	  Ref: RS § 4.4 Register 25 – Sample Rate Divider
+	 - max sample rate (don't care, as fchoice will be ...)
+	*/
+	val = 0;
+	imu->twrite(imu->ctx, SMPLRT_DIV, &val, sizeof(val));
+
+
+	/*
+	  Ref: RS § 4.6 Register 27 – Gyroscope Configuration
+	*/
+	val = 0;
+	val |= self->Gscale << 3; /* range */
+	val |= BIT(1) | BIT(0); /* set FCHOICE for no DLPF */
+	imu->twrite(imu->ctx, GYRO_CONFIG, &val, 1);
+
+
+	printf("Configure Accelerometer\n");
+	/*
+	  Ref:
+	*/
+	val = 0;
+	val |= self->Ascale <<3; /* range */
+	imu->twrite(imu->ctx, ACCEL_CONFIG, &val, 1);
+
+	val = 0;
+	val |= BIT(1) | BIT(0); /* accel_fchoice_b */
+	imu->twrite(imu->ctx, ACCEL_CONFIG2, &val, 1);
+
+
+
+	{
+		printf("Check interrupt workability\n");
+
+		imu->tread(imu->ctx, INT_STATUS, &val, sizeof(val));
+		imu->tread(imu->ctx, INT_STATUS, &val, sizeof(val));
+
+#if 0
+		if (val != 0) {
+			fprintf(stderr, "Why isn't INT_STATUS 0 after 2 reads (%2x)?\n", val);
+			return -3;
+		}
+#endif
 	}
 
 	/*
 	  Prepare communication with magnetometer
 	 */
 	{
-		val = 0;
-		//val |= BIT(0); /* enable raw data ready interrupt only */
-		imu->twrite(imu->ctx, INT_ENABLE, &val, 1);
-
-		imu->tread(imu->ctx, INT_STATUS, &val, 1);
-		imu->tread(imu->ctx, INT_STATUS, &val, 1);
-		if (val != 0) {
-			fprintf(stderr, "Why isn't INT_STATUS 0 after 2 reads (%2x)?\n", val);
-			return -3;
-		}
-
-		// Enable I2C master
-
+		printf("Enable I2C master\n");
 		val = 0;
 		val |= BIT(5); /* I2C_MST_EN */
-		val |= BIT(4); /* Disable I2C slave (TODO?) */
-		val |= BIT(1); /* I2C_MST_RST */
+		val |= BIT(4); /* Disable I2C slave */
+		// (https://www.invensense.com/developers/forums/topic/how-can-i-access-magak8953-with-spi/#post-36017)
 		imu->twrite(imu->ctx, USER_CTRL, &val, 1);
 
 		imu->sleep(imu->ctx, (imu_abstime_t)100000000);
 
 		val = 0;
 		val |= BIT(6); /* WAIT_FOR_ES */
+		val |= BIT(4); /* start/msg/stop */
 		val |= 13; /* 400 kHz */
 		imu->twrite(imu->ctx, I2C_MST_CTRL, &val, 1);
 
+#if 1
+		imu->tread(imu->ctx, USER_CTRL, &val, 1);
+		val |= BIT(1); /* I2C_MST_RST */
+		imu->twrite(imu->ctx, USER_CTRL, &val, 1);
+#endif
+
+		printf("Slave address + read\n");
+
+#if defined(IMU_MPU9250_MAGACCESS_OPTIMIZED)
 		/*
 		  Enable read of slave, by default.
 		  Writes are occasional and the write operation should reset
@@ -271,14 +378,25 @@ static int imu_mpu9250_initialize(struct imu * imu)
 		*/
 		val = AK8963_ADDRESS | BIT(7);
 		imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, 1);
+#endif
 
-		{
+#if 1
+		int err_count = 0;
+		for (int i = 0; i < 10; i++) {
+			printf("Read whoami\n");
 			imu_mpu9250_tread_mag(imu, WHO_AM_I_AK8963, &val, 1);
 			if (val != 0x48) {
-				printf("pouet %d\n", val);
-				return -3;
+				printf("NG %d\n", val);
+				err_count++;
+			}
+			else {
+				printf("\x1B[33;1mOK!\x1B[0m\n");
 			}
 		}
+		if (err_count > 0) {
+			return -3;
+		}
+#endif
 	}
 
 
@@ -287,27 +405,29 @@ static int imu_mpu9250_initialize(struct imu * imu)
 		  Configure the magnetometer.
 		 */
 
+		printf("Reset\n");
 		val = BIT(0);
 		imu_mpu9250_twrite_mag(imu, AK8963_CNTL2, &val, sizeof(val));
 
-		val = BIT(4)|BIT(0);
+		printf("Continuous measurement in 16bit\n");
+		val = 0;
+		val |= BIT(4); /* 16-bit */
+		val |= BIT(2)|BIT(1); /* continuous measurement mode 100 Hz */
 		imu_mpu9250_twrite_mag(imu, AK8963_CNTL1, &val, sizeof(val));
 
+#if 0
+		printf("Configure automatic readout by MPU-9250\n");
 		val = AK8963_ADDRESS | BIT(7); // Enable read
 		imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, sizeof(val));
-
 		val = AK8963_ST1;
 		imu->twrite(imu->ctx, I2C_SLV0_REG, &val, sizeof(val));
-
-		val = 0x88;
+		val = 0x80 | 7;
 		imu->twrite(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
-
-		//imu->twrite(imu->ctx, I2C_MST_DELAY_CTRL, (uint8_t[]){0x81}, 1);
+		val = 0x81;
+		imu->twrite(imu->ctx, I2C_MST_DELAY_CTRL, &val, sizeof(val));
+#endif
 
 	}
-	// The accelerometer, gyro, and thermometer are set to 1 kHz sample rates,
-	// but all these rates are further reduced by a factor of 5 to 200 Hz because of the SMPLRT_DIV setting
-
 
 	{
 		self->acc_res = imu_mpu9250_get_accres(self->Ascale);
