@@ -57,3 +57,12 @@ def build(bld):
 		 source="imu_mpu9250.c",
 		)
 
+		if 0:
+			bld(
+			 target="imu_mpu9250_test",
+			 features="c cprogram",
+			 includes=[bld.path.abspath()],
+			 source=["imu_mpu9250_test.c", "ftdispi.c"],
+			 lib="ftdi",
+			)
+
