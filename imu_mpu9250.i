@@ -17,6 +17,15 @@
 
 #include "imu_mpu9250.h"
 
+//#define IMU_DEBUG
+
+#if defined(IMU_DEBUG)
+# include <stdio.h>
+#else
+# define printf(fmt, ...)
+# define fprintf(f, fmt, ...)
+#endif
+
 /*! Return the magnetometer resolution (T) from current config
 
     Ref: §5 Register Map for Magnetometer / §5.6 Measurement Data
