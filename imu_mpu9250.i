@@ -106,6 +106,25 @@ IMU_EXPORT int imu_mpu9250_read_gyr(struct imu * imu)
 }
 
 
+IMU_EXPORT int imu_mpu9250_read_acc_gyr(struct imu * imu)
+{
+	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
+	int res;
+
+	uint8_t rawData[14];
+	res = imu->tread(imu->ctx, ACCEL_XOUT_H, &rawData[0], sizeof(rawData));
+	self->acc_data[0] = ((int16_t)rawData[0] << 8) | rawData[1];
+	self->acc_data[1] = ((int16_t)rawData[2] << 8) | rawData[3];
+	self->acc_data[2] = ((int16_t)rawData[4] << 8) | rawData[5];
+	self->temp_data   = ((int16_t)rawData[6] << 8) | rawData[7];
+	self->gyr_data[0] = ((int16_t)rawData[8] << 8) | rawData[9];
+	self->gyr_data[1] = ((int16_t)rawData[10] << 8) | rawData[11];
+	self->gyr_data[2] = ((int16_t)rawData[12] << 8) | rawData[13];
+	return res;
+}
+
+
+
 IMU_EXPORT int imu_mpu9250_tread_mag(struct imu * imu,
  uint8_t reg, uint8_t * buf, int count)
 {
@@ -464,19 +483,29 @@ IMU_EXPORT int imu_mpu9250_poll(struct imu * imu, unsigned flags)
 	int ret = 0;
 	int res;
 
-	if ((flags & BIT(IMU_READ_ACC)) != 0) {
+	if ((flags & (BIT(IMU_READ_ACC)) != 0) && ((flags & BIT(IMU_READ_GYR)) != 0)) {
 		imu->now(imu->ctx, &self->t_acc);
-		res = imu_mpu9250_read_acc(imu);
+		self->t_gyr = self->t_acc;
+		res = imu_mpu9250_read_acc_gyr(imu);
 		if (res != 0) {
 			ret = res;
 		}
 	}
+	else {
+		if ((flags & BIT(IMU_READ_ACC)) != 0) {
+			imu->now(imu->ctx, &self->t_acc);
+			res = imu_mpu9250_read_acc(imu);
+			if (res != 0) {
+				ret = res;
+			}
+		}
 
-	if ((flags & BIT(IMU_READ_GYR)) != 0) {
-		imu->now(imu->ctx, &self->t_gyr);
-		res = imu_mpu9250_read_gyr(imu);
-		if (res != 0) {
-			ret = res;
+		if ((flags & BIT(IMU_READ_GYR)) != 0) {
+			imu->now(imu->ctx, &self->t_gyr);
+			res = imu_mpu9250_read_gyr(imu);
+			if (res != 0) {
+				ret = res;
+			}
 		}
 	}
 
