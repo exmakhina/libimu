@@ -168,11 +168,15 @@ IMU_EXPORT int imu_mpu9250_tread_mag(struct imu * imu,
 	imu->sleep(imu->ctx, (imu_abstime_t)20000 * (2+count) + 30000);
 #endif
 
-	res = imu->tread(imu->ctx, EXT_SENS_DATA_00, buf, count);
-
-#if defined(IMU_MPU9250_MAGACCESS_RB)
+#if 1 /* This is doing something very magical */
 	val = 0;
 	imu->twrite(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
+#endif
+
+	res = imu->tread(imu->ctx, EXT_SENS_DATA_00, buf, count);
+
+
+#if defined(IMU_MPU9250_MAGACCESS_RB)
 	imu->tread(imu->ctx, I2C_SLV0_ADDR, &val, sizeof(val));
 	imu->tread(imu->ctx, I2C_SLV0_REG, &val, sizeof(val));
 	imu->tread(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
