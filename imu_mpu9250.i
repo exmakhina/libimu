@@ -11,6 +11,10 @@
 #include <math.h>
 #include <errno.h>
 
+#if !defined(NULL)
+# define NULL ((void*)0)
+#endif
+
 #if !defined(IMU_EXPORT)
 # define IMU_EXPORT static inline
 #endif
@@ -21,9 +25,11 @@
 
 #if defined(IMU_DEBUG)
 # include <stdio.h>
+# define imu_debug(fmt, ...)
+# define imu_warn(f, fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
 #else
-# define printf(fmt, ...)
-# define fprintf(f, fmt, ...)
+# define imu_debug(fmt, ...)
+# define imu_warn(fmt, ...)
 #endif
 
 #define IMU_MPU9250_MAGACCESS_OPTIMIZE_FAVOR_R
@@ -182,7 +188,7 @@ IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 		uint8_t val;
 		imu_mpu9250_tread_mag(imu, AK8963_ST1, &val, sizeof(val));
 		if ((val & BIT(0)) == 0) {
-			printf("Mag data not ready yet\n");
+			imu_warn("Mag data not ready yet (%02x)\n", val);
 			//continue;
 		}
 		break;
@@ -195,12 +201,12 @@ IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 	uint8_t st2 = rawData[6]; /* check for overflow */
 #if 1
 	if ((st2 & BIT(4)) == 0) {
-		fprintf(stderr, "Invalid st2 register contents (0x%02x), expecting 16-bit config\n", st2);
+		imu_warn("Invalid st2 register contents (0x%02x), expecting 16-bit config\n", st2);
 		return -1;
 	}
 #endif
 	if ((st2 & BIT(3)) != 0) {
-		fprintf(stderr, "Magnetic field overflow\n");
+		imu_warn("Magnetic field overflow\n");
 		return -2;
 	}
 
@@ -211,10 +217,10 @@ IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 	return 0;
 }
 
-int imu_mpu9250_read_temp(struct imu_mpu9250 * self)
+int imu_mpu9250_read_temp(struct imu * imu)
 {
+	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
 	int res = 0;
-	struct imu * imu = (struct imu*)self;
 	uint8_t rawData[2];
 	imu->now(imu->ctx, &self->t_temp);
 	res = imu->tread(imu->ctx, TEMP_OUT_H, &rawData[0], 2);
@@ -228,7 +234,7 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
 	int res;
 
-	printf("Check who am I\n");
+	imu_debug("Check who am I\n");
 	uint8_t val = 0;
 	{
 		res = imu->tread(imu->ctx, WHO_AM_I_MPU9250, &val, sizeof(val));
@@ -240,7 +246,7 @@ static int imu_mpu9250_initialize(struct imu * imu)
 		}
 	}
 
-	printf("Wake up device, reset everything\n");
+	imu_debug("Wake up device, reset everything\n");
 	val = BIT(7);
 	imu->twrite(imu->ctx, PWR_MGMT_1, &val, sizeof(val));
 
@@ -251,7 +257,7 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	val = 0;
 	imu->twrite(imu->ctx, PWR_MGMT_2, &val, sizeof(val));
 
-	printf("Enable interrupts for raw data only\n");
+	imu_debug("Enable interrupts for raw data only\n");
 	val = 0;
 	val |= BIT(0); /* enable raw data ready interrupt only */
 	imu->twrite(imu->ctx, INT_ENABLE, &val, 1);
@@ -262,7 +268,7 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	for (int i = 0; i < 100; i++) {
 		imu->tread(imu->ctx, INT_STATUS, &val, sizeof(val));
 		if (val != 0) {
-			fprintf(stderr, "INT_STATUS (%2x)?\n", val);
+			imu_warn("INT_STATUS (%2x)?\n", val);
 		}
 		if ((val & BIT(2)) == 0) {
 			break;
@@ -280,12 +286,12 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	val |= BIT(1); /* I2C master pins bypass mode if disabled */
 	imu->twrite(imu->ctx, INT_PIN_CFG, &val, sizeof(val));
 
-	printf("Configure internal clock as we don't care about DMP\n");
+	imu_debug("Configure internal clock as we don't care about DMP\n");
 	/* Ref: PS § 4.1 clocking / RM § 4.34 Register 107 – Power Management 1*/
 	val = 1; /* internal clock */
 	imu->twrite(imu->ctx, PWR_MGMT_1, &val, sizeof(val));
 
-	printf("Configure Gyro\n");
+	imu_debug("Configure Gyro\n");
 	/*
 	  Ref: RS § 4.5 Register 26 – Configuration
 	  - DLPF_CFG: don't care, we'll use the maximum available rate
@@ -310,7 +316,7 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	imu->twrite(imu->ctx, GYRO_CONFIG, &val, 1);
 
 
-	printf("Configure Accelerometer\n");
+	imu_debug("Configure Accelerometer\n");
 	/*
 	  Ref:
 	*/
@@ -325,14 +331,14 @@ static int imu_mpu9250_initialize(struct imu * imu)
 
 
 	{
-		printf("Check interrupt workability\n");
+		imu_debug("Check interrupt workability\n");
 
 		imu->tread(imu->ctx, INT_STATUS, &val, sizeof(val));
 		imu->tread(imu->ctx, INT_STATUS, &val, sizeof(val));
 
 #if 0
 		if (val != 0) {
-			fprintf(stderr, "Why isn't INT_STATUS 0 after 2 reads (%2x)?\n", val);
+			imu_warn("Why isn't INT_STATUS 0 after 2 reads (%2x)?\n", val);
 			return -3;
 		}
 #endif
@@ -342,7 +348,7 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	  Prepare communication with magnetometer
 	 */
 	{
-		printf("Enable I2C master\n");
+		imu_debug("Enable I2C master\n");
 		val = 0;
 		val |= BIT(5); /* I2C_MST_EN */
 		val |= BIT(4); /* Disable I2C slave */
@@ -367,7 +373,7 @@ static int imu_mpu9250_initialize(struct imu * imu)
 		imu->twrite(imu->ctx, USER_CTRL, &val, 1);
 #endif
 
-		printf("Slave address + read\n");
+		imu_debug("Slave address + read\n");
 
 #if defined(IMU_MPU9250_MAGACCESS_OPTIMIZE_FAVOR_R)
 		/*
@@ -382,14 +388,14 @@ static int imu_mpu9250_initialize(struct imu * imu)
 #if 1
 		int err_count = 0;
 		for (int i = 0; i < 10; i++) {
-			printf("Read whoami\n");
+			imu_debug("Read whoami\n");
 			imu_mpu9250_tread_mag(imu, WHO_AM_I_AK8963, &val, 1);
 			if (val != 0x48) {
-				printf("NG %d\n", val);
+				imu_debug("NG %d\n", val);
 				err_count++;
 			}
 			else {
-				printf("\x1B[33;1mOK!\x1B[0m\n");
+				imu_debug("\x1B[33;1mOK!\x1B[0m\n");
 			}
 		}
 		if (err_count > 0) {
@@ -404,18 +410,18 @@ static int imu_mpu9250_initialize(struct imu * imu)
 		  Configure the magnetometer.
 		 */
 
-		printf("Reset\n");
+		imu_debug("Reset\n");
 		val = BIT(0);
 		imu_mpu9250_twrite_mag(imu, AK8963_CNTL2, &val, sizeof(val));
 
-		printf("Continuous measurement in 16bit\n");
+		imu_debug("Continuous measurement in 16bit\n");
 		val = 0;
 		val |= BIT(4); /* 16-bit */
 		val |= BIT(2)|BIT(1); /* continuous measurement mode 100 Hz */
 		imu_mpu9250_twrite_mag(imu, AK8963_CNTL1, &val, sizeof(val));
 
 #if 0
-		printf("Configure automatic readout by MPU-9250\n");
+		imu_debug("Configure automatic readout by MPU-9250\n");
 		val = AK8963_ADDRESS | BIT(7); // Enable read
 		imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, sizeof(val));
 		val = AK8963_ST1;
@@ -490,10 +496,18 @@ IMU_EXPORT int imu_mpu9250_get_acc(struct imu * imu,
  imu_abstime_t * at, float * ax, float * ay, float * az)
 {
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
-	*at = self->t_acc;
-	*ax = (self->acc_data[0] + self->acc_bias[0]) * self->acc_gain[0];
-	*ay = (self->acc_data[1] + self->acc_bias[1]) * self->acc_gain[1];
-	*az = (self->acc_data[2] + self->acc_bias[2]) * self->acc_gain[2];
+	if (at != NULL) {
+		*at = self->t_acc;
+	}
+	if (ax != NULL) {
+		*ax = (self->acc_data[0] + self->acc_bias[0]) * self->acc_gain[0];
+	}
+	if (ay != NULL) {
+		*ay = (self->acc_data[1] + self->acc_bias[1]) * self->acc_gain[1];
+	}
+	if (az != NULL) {
+		*az = (self->acc_data[2] + self->acc_bias[2]) * self->acc_gain[2];
+	}
 	return 0;
 }
 
@@ -501,10 +515,18 @@ IMU_EXPORT int imu_mpu9250_get_gyr(struct imu * imu,
   imu_abstime_t * gt, float * gx, float * gy, float * gz)
 {
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
-	*gt = self->t_gyr;
-	*gx = (self->gyr_data[0] + self->gyr_bias[0]) * self->gyr_gain[0];
-	*gy = (self->gyr_data[1] + self->gyr_bias[1]) * self->gyr_gain[1];
-	*gz = (self->gyr_data[2] + self->gyr_bias[2]) * self->gyr_gain[2];
+	if (gt != NULL) {
+		*gt = self->t_gyr;
+	}
+	if (gx != NULL) {
+		*gx = (self->gyr_data[0] + self->gyr_bias[0]) * self->gyr_gain[0];
+	}
+	if (gy != NULL) {
+		*gy = (self->gyr_data[1] + self->gyr_bias[1]) * self->gyr_gain[1];
+	}
+	if (gz != NULL) {
+		*gz = (self->gyr_data[2] + self->gyr_bias[2]) * self->gyr_gain[2];
+	}
 	return 0;
 }
 
@@ -512,10 +534,18 @@ IMU_EXPORT int imu_mpu9250_get_mag(struct imu * imu,
  imu_abstime_t * mt, float * mx, float * my, float * mz)
 {
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
-	*mt = self->t_mag;
-	*mx = (self->mag_data[0] + self->mag_bias[0]) * self->mag_gain[0];
-	*my = (self->mag_data[1] + self->mag_bias[1]) * self->mag_gain[1];
-	*mz = (self->mag_data[2] + self->mag_bias[2]) * self->mag_gain[2];
+	if (mt != NULL) {
+		*mt = self->t_mag;
+	}
+	if (mx != NULL) {
+		*mx = (self->mag_data[0] + self->mag_bias[0]) * self->mag_gain[0];
+	}
+	if (my != NULL) {
+		*my = (self->mag_data[1] + self->mag_bias[1]) * self->mag_gain[1];
+	}
+	if (mz != NULL) {
+		*mz = (self->mag_data[2] + self->mag_bias[2]) * self->mag_gain[2];
+	}
 	return 0;
 }
 
@@ -532,7 +562,10 @@ IMU_EXPORT int imu_mpu9250_get_temp(struct imu * imu,
 	  Ref: PS-MPU-9250A-01 v1.0 § 3.4.2 A.C. Electrical Characteristics
 	 */
 	float const _1_sensitivity = 1.0f/333.87;
-	*tdegc = (self->temp_data - self->temp_offset) * _1_sensitivity;
+
+	if (tdegc != NULL) {
+		*tdegc = (self->temp_data - self->temp_offset) * _1_sensitivity;
+	}
 	return 0;
 }
 
