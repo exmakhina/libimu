@@ -14,11 +14,12 @@
 
 #include <imu_mpu9250.i>
 
+//#define DEBUG_SPI
 
 static int imut_sleep(imu_ctx_t ctx, int64_t dt)
 {
 	int res;
-	printf("sleep %" PRIu64 "\n", dt);
+	printf("sleep %" PRIu64 " µs\n", dt/(uint64_t)1000);
 	struct timespec request;
 	request.tv_sec = dt / (uint64_t)1000000000;
 	request.tv_nsec = dt % (uint64_t)1000000000;
@@ -33,14 +34,14 @@ int imut_read(imu_ctx_t ctx, int reg, uint8_t * buf, int buflen)
 	struct ftdispi_context * fsc = (struct ftdispi_context*)ctx;
 	int res;
 
-#if 0
-	printf("Read %p %02x\n", fsc, reg);
+#if defined(DEBUG_SPI)
+	printf("spiget 0x%02x", reg);
 #endif
 	uint8_t const txbuf[] = { (1<<7) | reg };
 	res = ftdispi_write_read(fsc, txbuf, sizeof(txbuf), buf, buflen, 0);
-#if 0
+#if defined(DEBUG_SPI)
 	for (int i = 0; i < buflen; i++) {
-		printf(" %02x", buf[i]);
+		printf(" 0x%02x", buf[i]);
 	}
 	printf("\n");
 #endif
@@ -53,14 +54,50 @@ int imut_write(imu_ctx_t ctx, int reg, uint8_t const * buf, int buflen)
 	struct ftdispi_context * fsc = (struct ftdispi_context*)ctx;
 	int res;
 
-	uint8_t const txbuf[] = { (1<<7) | reg };
-	printf("Write %02x\n", reg);
+#if defined(DEBUG_SPI)
+	printf("spiset 0x%02x", reg);
+#endif
+
+#if defined(DOESNT_WORK)
+	uint8_t const txbuf[] = { (0<<7) | reg };
 	res = ftdispi_write(fsc, txbuf, sizeof(txbuf), 0);
 	res = ftdispi_write(fsc, buf, buflen, 0);
+#else
+	uint8_t * buf_tx = malloc(buflen+1);
+	buf_tx[0] = (0<<7) | reg;
+	memcpy(&buf_tx[1], buf, buflen);
+	res = ftdispi_write(fsc, buf_tx, buflen+1, 0);
+	free(buf_tx);
+#endif
+
+#if defined(DEBUG_SPI)
 	for (int i = 0; i < buflen; i++) {
-		printf(" %02x", buf[i]);
+		printf(" 0x%02x", buf[i]);
 	}
+#endif
+
+#if defined(DEBUG_READBACK)
+	{
+		uint8_t const txbuf[] = { (1<<7) | reg };
+		printf(" rb ");
+		//usleep(100000);
+		uint8_t * buf_rb = malloc(buflen);
+		res = ftdispi_write_read(fsc, txbuf, sizeof(txbuf), buf_rb, buflen, 0);
+		printf(" (%d)", res);
+		for (int i = 0; i < buflen; i++) {
+			if (buf_rb[i] != buf[i]) {
+				printf("\x1B[31;1m");
+			}
+			printf(" 0x%02x", buf_rb[i]);
+			printf("\x1B[0m");
+		}
+		free(buf_rb);
+	}
+#endif
+
+#if defined(DEBUG_SPI)
 	printf("\n");
+#endif
 	return res;
 }
 
@@ -117,23 +154,37 @@ int main(int argc, char **argv)
 	printf("poll\n");
 	while (1)
 	{
-		res = imu->poll(imu, BIT(IMU_READ_GYR)|BIT(IMU_READ_ACC));
+		unsigned flags = 0;
+		flags |= BIT(IMU_READ_GYR);
+		flags |= BIT(IMU_READ_ACC);
+		flags |= BIT(IMU_READ_MAG);
+		res = imu->poll(imu, flags);
 
-		{
+		if ((flags & BIT(IMU_READ_ACC)) != 0) {
 			imu_abstime_t t;
 			float ax, ay, az;
 			res = imu->get_acc(imu, &t, &ax, &ay, &az);
-			printf("t=%" PRIimuabstime " ax=%7.3f ay=%7.3f az=%7.3f (m/s²)\n", t, ax, ay, az);
+			printf(" t=%" PRIimuabstime " ax=%7.3f ay=%7.3f az=%7.3f (m/s²)",
+			 t, ax, ay, az);
 		}
 
-#if 0
-		{
+		if ((flags & BIT(IMU_READ_GYR)) != 0) {
 			imu_abstime_t t;
 			float gx, gy, gz;
 			res = imu->get_gyr(imu, &t, &gx, &gy, &gz);
-			printf("t=%" PRIimuabstime " gx=%7.3f gy=%7.3f gz=%7.3f (rad/s)\n", t, gx, gy, gz);
+			printf(" t=%" PRIimuabstime " gx=%7.3f gy=%7.3f gz=%7.3f (rad/s)",
+			 t, gx, gy, gz);
 		}
-#endif
+
+		if ((flags & BIT(IMU_READ_MAG)) != 0) {
+			imu_abstime_t t;
+			float mx, my, mz;
+			res = imu->get_mag(imu, &t, &mx, &my, &mz);
+			printf(" t=%" PRIimuabstime " mx=%7.3f my=%7.3f mz=%7.3f (µT)",
+			 t, 1e6*mx, 1e6*my, 1e6*mz);
+		}
+		printf("\n");
+
 	}
 
 end:
