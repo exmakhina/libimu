@@ -26,6 +26,8 @@
 # define fprintf(f, fmt, ...)
 #endif
 
+#define IMU_MPU9250_MAGACCESS_OPTIMIZE_FAVOR_R
+
 /*! Return the magnetometer resolution (T) from current config
 
     Ref: §5 Register Map for Magnetometer / §5.6 Measurement Data
@@ -107,7 +109,7 @@ IMU_EXPORT int imu_mpu9250_tread_mag(struct imu * imu,
 
 	/* Note that we're already set to read */
 
-#if !defined(IMU_MPU9250_MAGACCESS_OPTIMIZED)
+#if !defined(IMU_MPU9250_MAGACCESS_OPTIMIZE_FAVOR_R)
 	val = AK8963_ADDRESS | BIT(7);
 	imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, 1);
 #endif
@@ -164,7 +166,7 @@ IMU_EXPORT int imu_mpu9250_twrite_mag(struct imu * imu,
 	val = 0x80 | count;
 	imu->twrite(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
 
-#if defined(IMU_MPU9250_MAGACCESS_OPTIMIZED)
+#if defined(IMU_MPU9250_MAGACCESS_OPTIMIZE_FAVOR_R)
 	// go back to read mode
 	val = AK8963_ADDRESS | BIT(7);
 	imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, sizeof(val));
@@ -370,7 +372,7 @@ static int imu_mpu9250_initialize(struct imu * imu)
 
 		printf("Slave address + read\n");
 
-#if defined(IMU_MPU9250_MAGACCESS_OPTIMIZED)
+#if defined(IMU_MPU9250_MAGACCESS_OPTIMIZE_FAVOR_R)
 		/*
 		  Enable read of slave, by default.
 		  Writes are occasional and the write operation should reset
