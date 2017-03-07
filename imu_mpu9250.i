@@ -354,13 +354,17 @@ static int imu_mpu9250_initialize(struct imu * imu)
 
 		imu->sleep(imu->ctx, (imu_abstime_t)100000000);
 
+		/*
+		  WAIT_FOR_ES is not mandatory to get built-in I2C master function,
+		  TODO clarify what it would do.
+		 */
 		val = 0;
 		val |= BIT(6); /* WAIT_FOR_ES */
 		val |= BIT(4); /* start/msg/stop */
 		val |= 13; /* 400 kHz */
 		imu->twrite(imu->ctx, I2C_MST_CTRL, &val, 1);
 
-#if 1
+#if defined(IMU_MPU9250_I_REALLY_WANT_TO_RESET_I2C_MST)
 		imu->tread(imu->ctx, USER_CTRL, &val, 1);
 		val |= BIT(1); /* I2C_MST_RST */
 		imu->twrite(imu->ctx, USER_CTRL, &val, 1);
