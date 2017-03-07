@@ -160,6 +160,13 @@ int main(int argc, char **argv)
 		flags |= BIT(IMU_READ_MAG);
 		res = imu->poll(imu, flags);
 
+		{
+			imu_mpu9250_read_temp(imu);
+			float temp;
+			imu_mpu9250_get_temp(imu, NULL, &temp);
+			printf(" %7.3f °C", temp);
+		}
+
 		if ((flags & BIT(IMU_READ_ACC)) != 0) {
 			imu_abstime_t t;
 			float ax, ay, az;

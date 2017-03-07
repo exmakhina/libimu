@@ -50,6 +50,7 @@ struct imu_mpu9250 {
 	//! \{
 	imu_abstime_t t_temp;
 	int16_t temp_data;
+	int16_t temp_offset;
 	//! \}
 
 	uint8_t Mmode; // Either 8 Hz (0x02) or 100 Hz (0x06) magnetometer data ODR

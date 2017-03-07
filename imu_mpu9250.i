@@ -216,6 +216,7 @@ int imu_mpu9250_read_temp(struct imu_mpu9250 * self)
 	int res = 0;
 	struct imu * imu = (struct imu*)self;
 	uint8_t rawData[2];
+	imu->now(imu->ctx, &self->t_temp);
 	res = imu->tread(imu->ctx, TEMP_OUT_H, &rawData[0], 2);
 	self->temp_data = ((int16_t)rawData[0]) << 8 | rawData[1];
 	return res;
@@ -522,6 +523,25 @@ IMU_EXPORT int imu_mpu9250_get_mag(struct imu * imu,
 	return 0;
 }
 
+IMU_EXPORT int imu_mpu9250_get_temp(struct imu * imu,
+ imu_abstime_t * mt, float * tdegc)
+{
+	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
+
+	if (mt != NULL) {
+		*mt = self->t_temp;
+	}
+
+	/*
+	  Ref: PS-MPU-9250A-01 v1.0 § 3.4.2 A.C. Electrical Characteristics
+	 */
+	float const _1_sensitivity = 1.0f/333.87;
+	*tdegc = (self->temp_data - self->temp_offset) * _1_sensitivity;
+	return 0;
+}
+
+
+
 IMU_EXPORT int imu_mpu9250_init(struct imu * imu)
 {
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
@@ -532,6 +552,7 @@ IMU_EXPORT int imu_mpu9250_init(struct imu * imu)
 	self->Gscale = GFS_250DPS;
 	self->Mscale = MFS_16BITS;
 	self->Mmode = 0x06;
+	self->temp_offset = 0;
 
 	// Initialize device
 	res = imu_mpu9250_initialize(imu);
