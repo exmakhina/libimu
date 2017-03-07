@@ -33,6 +33,7 @@
 #endif
 
 #define IMU_MPU9250_MAGACCESS_OPTIMIZE_FAVOR_R
+//#define IMU_MPU9250_MAGACCESS_AUTOMATIC
 
 /*! Return the magnetometer resolution (T) from current config
 
@@ -132,14 +133,14 @@ IMU_EXPORT int imu_mpu9250_tread_mag(struct imu * imu,
 	int res;
 	uint8_t val;
 
-	/* Note that we're already set to read */
-
 #if !defined(IMU_MPU9250_MAGACCESS_OPTIMIZE_FAVOR_R)
 	val = AK8963_ADDRESS | BIT(7);
 	imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, 1);
+#else
+	/* Note that we're already set to read */
 #endif
 
-#if defined(IMU_MPU9250_MAGREAD_OPTIMIZED)
+#if defined(IMU_MPU9250_MAGREAD_OPTIMIZED2)
 	/* clear read interrupt, will use it to know when data is ready*/
 	imu->tread(imu->ctx, INT_STATUS, &val, sizeof(val));
 #endif
@@ -150,9 +151,16 @@ IMU_EXPORT int imu_mpu9250_tread_mag(struct imu * imu,
 	imu->twrite(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
 
 #if defined(IMU_MPU9250_MAGREAD_OPTIMIZED)
+	/*
+	  § 4.18 Register 54 – I C Master Status
+
+	  TODO:
+	  “I2C_SLV0_NACK [...] will cause an interrupt if bit
+	  I2C_MST_INT_EN in the INT_ENABLE register is asserted”
+	 */
 	do {
-		imu->tread(imu->ctx, INT_STATUS, &val, sizeof(val));
-		if ((val & BIT(0)) == 0) {
+		imu->tread(imu->ctx, I2C_MST_STATUS, &val, sizeof(val));
+		if ((val & BIT(0)) != 0) {
 			break;
 		}
 	} while (1);
@@ -203,6 +211,8 @@ IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
 	int res = 0;
 
+#if !defined(IMU_MPU9250_MAGACCESS_AUTOMATIC)
+
 	do {
 		uint8_t val;
 		imu_mpu9250_tread_mag(imu, AK8963_ST1, &val, sizeof(val));
@@ -229,9 +239,38 @@ IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 		return -2;
 	}
 
-	self->mag_data[0] = (int16_t)(((int16_t)rawData[1] << 8) | rawData[0]);
-	self->mag_data[1] = (int16_t)(((int16_t)rawData[3] << 8) | rawData[2]);
-	self->mag_data[2] = (int16_t)(((int16_t)rawData[5] << 8) | rawData[4]);
+	self->mag_data[0] = ((int16_t)rawData[1] << 8) | rawData[0];
+	self->mag_data[1] = ((int16_t)rawData[3] << 8) | rawData[2];
+	self->mag_data[2] = ((int16_t)rawData[5] << 8) | rawData[4];
+
+#else /* !!defined(IMU_MPU9250_MAGACCESS_AUTOMATIC) */
+
+	uint8_t buf[8];
+	res = imu->tread(imu->ctx, EXT_SENS_DATA_00, buf, sizeof(buf));
+
+	uint8_t st1 = buf[0];
+	if ((st1 & BIT(0)) == 0) {
+		imu_warn("Mag data invalid (%02x)\n", st1);
+		return -3;
+	}
+
+	uint8_t st2 = buf[7];
+#if 1
+	if ((st2 & BIT(4)) == 0) {
+		imu_warn("Invalid st2 register contents (0x%02x), expecting 16-bit config\n", st2);
+		return -1;
+	}
+#endif
+	if ((st2 & BIT(3)) != 0) {
+		imu_warn("Magnetic field overflow\n");
+		return -2;
+	}
+
+	self->mag_data[0] = ((int16_t)buf[2] << 8) | buf[1];
+	self->mag_data[1] = ((int16_t)buf[4] << 8) | buf[3];
+	self->mag_data[2] = ((int16_t)buf[6] << 8) | buf[5];
+
+#endif /* !!defined(IMU_MPU9250_MAGACCESS_AUTOMATIC) */
 
 	return 0;
 }
@@ -244,6 +283,56 @@ int imu_mpu9250_read_temp(struct imu * imu)
 	imu->now(imu->ctx, &self->t_temp);
 	res = imu->tread(imu->ctx, TEMP_OUT_H, &rawData[0], 2);
 	self->temp_data = ((int16_t)rawData[0]) << 8 | rawData[1];
+	return res;
+}
+
+
+
+IMU_EXPORT int imu_mpu9250_read_acc_gyr_mag(struct imu * imu)
+{
+	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
+	int res;
+
+#if !defined(IMU_MPU9250_MAGACCESS_AUTOMATIC)
+	/* TODO optimize */
+	res = imu_mpu9250_read_acc_gyr(imu);
+	res = imu_mpu9250_read_mag(imu);
+	return res;
+#endif
+
+	uint8_t buf[22];
+	res = imu->tread(imu->ctx, ACCEL_XOUT_H, &buf[0], sizeof(buf));
+	self->acc_data[0] = ((int16_t)buf[0] << 8) | buf[1];
+	self->acc_data[1] = ((int16_t)buf[2] << 8) | buf[3];
+	self->acc_data[2] = ((int16_t)buf[4] << 8) | buf[5];
+	self->temp_data   = ((int16_t)buf[6] << 8) | buf[7];
+	self->gyr_data[0] = ((int16_t)buf[8] << 8) | buf[9];
+	self->gyr_data[1] = ((int16_t)buf[10] << 8) | buf[11];
+	self->gyr_data[2] = ((int16_t)buf[12] << 8) | buf[13];
+
+
+	uint8_t st1 = buf[14];
+	if ((st1 & BIT(0)) == 0) {
+		imu_warn("Mag data invalid (%02x)\n", st1);
+		return -3;
+	}
+
+	uint8_t st2 = buf[21];
+#if 1
+	if ((st2 & BIT(4)) == 0) {
+		imu_warn("Invalid st2 register contents (0x%02x), expecting 16-bit config\n", st2);
+		return -1;
+	}
+#endif
+	if ((st2 & BIT(3)) != 0) {
+		imu_warn("Magnetic field overflow\n");
+		return -2;
+	}
+
+	self->mag_data[0] = ((int16_t)buf[16] << 8) | buf[15];
+	self->mag_data[1] = ((int16_t)buf[18] << 8) | buf[17];
+	self->mag_data[2] = ((int16_t)buf[20] << 8) | buf[19];
+
 	return res;
 }
 
@@ -331,13 +420,13 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	*/
 	val = 0;
 	val |= self->Gscale << 3; /* range */
-	val |= BIT(1) | BIT(0); /* set FCHOICE for no DLPF */
+	val |= BIT(1) | BIT(0); /* set FCHOICE=00 for no DLPF */
 	imu->twrite(imu->ctx, GYRO_CONFIG, &val, 1);
 
 
 	imu_debug("Configure Accelerometer\n");
 	/*
-	  Ref:
+	  Ref: RS § 4.8 Register 29 – Accelerometer Configuration 2
 	*/
 	val = 0;
 	val |= self->Ascale <<3; /* range */
@@ -436,19 +525,22 @@ static int imu_mpu9250_initialize(struct imu * imu)
 		imu_debug("Continuous measurement in 16bit\n");
 		val = 0;
 		val |= BIT(4); /* 16-bit */
+
 		val |= BIT(2)|BIT(1); /* continuous measurement mode 100 Hz */
 		imu_mpu9250_twrite_mag(imu, AK8963_CNTL1, &val, sizeof(val));
 
-#if 0
+#if defined(IMU_MPU9250_MAGACCESS_AUTOMATIC)
 		imu_debug("Configure automatic readout by MPU-9250\n");
 		val = AK8963_ADDRESS | BIT(7); // Enable read
 		imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, sizeof(val));
 		val = AK8963_ST1;
 		imu->twrite(imu->ctx, I2C_SLV0_REG, &val, sizeof(val));
-		val = 0x80 | 7;
+		val = 0x80 | 8;
 		imu->twrite(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
-		val = 0x81;
-		imu->twrite(imu->ctx, I2C_MST_DELAY_CTRL, &val, sizeof(val));
+
+		
+		//val = 0x80;
+		//imu->twrite(imu->ctx, I2C_MST_DELAY_CTRL, &val, sizeof(val));
 #endif
 
 	}
@@ -483,37 +575,50 @@ IMU_EXPORT int imu_mpu9250_poll(struct imu * imu, unsigned flags)
 	int ret = 0;
 	int res;
 
-	if ((flags & (BIT(IMU_READ_ACC)) != 0) && ((flags & BIT(IMU_READ_GYR)) != 0)) {
+
+	if ((flags & (BIT(IMU_READ_ACC)) != 0)
+	 && ((flags & BIT(IMU_READ_GYR)) != 0)
+	 && ((flags & BIT(IMU_READ_MAG)) != 0)) {
 		imu->now(imu->ctx, &self->t_acc);
-		self->t_gyr = self->t_acc;
-		res = imu_mpu9250_read_acc_gyr(imu);
+		self->t_gyr = self->t_mag = self->t_acc;
+		res = imu_mpu9250_read_acc_gyr_mag(imu);
 		if (res != 0) {
 			ret = res;
 		}
 	}
 	else {
-		if ((flags & BIT(IMU_READ_ACC)) != 0) {
+		if ((flags & (BIT(IMU_READ_ACC)) != 0) && ((flags & BIT(IMU_READ_GYR)) != 0)) {
 			imu->now(imu->ctx, &self->t_acc);
-			res = imu_mpu9250_read_acc(imu);
+			self->t_gyr = self->t_acc;
+			res = imu_mpu9250_read_acc_gyr(imu);
 			if (res != 0) {
 				ret = res;
 			}
 		}
+		else {
+			if ((flags & BIT(IMU_READ_ACC)) != 0) {
+				imu->now(imu->ctx, &self->t_acc);
+				res = imu_mpu9250_read_acc(imu);
+				if (res != 0) {
+					ret = res;
+				}
+			}
 
-		if ((flags & BIT(IMU_READ_GYR)) != 0) {
-			imu->now(imu->ctx, &self->t_gyr);
-			res = imu_mpu9250_read_gyr(imu);
+			if ((flags & BIT(IMU_READ_GYR)) != 0) {
+				imu->now(imu->ctx, &self->t_gyr);
+				res = imu_mpu9250_read_gyr(imu);
+				if (res != 0) {
+					ret = res;
+				}
+			}
+		}
+
+		if ((flags & BIT(IMU_READ_MAG)) != 0) {
+			imu->now(imu->ctx, &self->t_mag);
+			res = imu_mpu9250_read_mag(imu);
 			if (res != 0) {
 				ret = res;
 			}
-		}
-	}
-
-	if ((flags & BIT(IMU_READ_MAG)) != 0) {
-		imu->now(imu->ctx, &self->t_mag);
-		res = imu_mpu9250_read_mag(imu);
-		if (res != 0) {
-			ret = res;
 		}
 	}
 
