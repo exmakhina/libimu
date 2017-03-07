@@ -135,19 +135,15 @@ IMU_EXPORT int imu_mpu9250_tread_mag(struct imu * imu,
 	imu->sleep(imu->ctx, (imu_abstime_t)1000000 * count);
 #endif
 
-	//for (int i = 0; i < 10; i++) {
-	//	imu->sleep(imu->ctx, (imu_abstime_t)100000000 * count);
-	//}
 	res = imu->tread(imu->ctx, EXT_SENS_DATA_00, buf, count);
 
+#if defined(IMU_MPU9250_MAGACCESS_RB)
 	val = 0;
 	imu->twrite(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
-
 	imu->tread(imu->ctx, I2C_SLV0_ADDR, &val, sizeof(val));
 	imu->tread(imu->ctx, I2C_SLV0_REG, &val, sizeof(val));
 	imu->tread(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
-
-	//imu->sleep(imu, 100000000);
+#endif
 
 	return res;
 }
