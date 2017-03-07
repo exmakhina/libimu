@@ -223,10 +223,6 @@ int imu_mpu9250_read_temp(struct imu_mpu9250 * self)
 }
 
 
-{
-}
-
-
 static int imu_mpu9250_initialize(struct imu * imu)
 {
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
