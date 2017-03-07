@@ -157,7 +157,7 @@ IMU_EXPORT int imu_mpu9250_tread_mag(struct imu * imu,
 		}
 	} while (1);
 #else
-	imu->sleep(imu->ctx, (imu_abstime_t)100000 * count);
+	imu->sleep(imu->ctx, (imu_abstime_t)20000 * (2+count) + 30000);
 #endif
 
 	res = imu->tread(imu->ctx, EXT_SENS_DATA_00, buf, count);
