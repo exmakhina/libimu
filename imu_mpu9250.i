@@ -25,8 +25,8 @@
 
 #if defined(IMU_DEBUG)
 # include <stdio.h>
-# define imu_debug(fmt, ...)
-# define imu_warn(f, fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
+# define imu_debug(...)
+# define imu_warn(...) fprintf(stderr, __VA_ARGS__)
 #else
 # define imu_debug(fmt, ...)
 # define imu_warn(fmt, ...)
