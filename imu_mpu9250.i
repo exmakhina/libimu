@@ -211,18 +211,18 @@ IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 	return 0;
 }
 
-int16_t imu_mpu9250_read_temp(struct imu_mpu9250 * self)
+int imu_mpu9250_read_temp(struct imu_mpu9250 * self)
 {
-	int res = -ENOSYS;
+	int res = 0;
+	struct imu * imu = (struct imu*)self;
+	uint8_t rawData[2];
+	res = imu->tread(imu->ctx, TEMP_OUT_H, &rawData[0], 2);
+	self->temp_data = ((int16_t)rawData[0]) << 8 | rawData[1];
 	return res;
 }
 
 
-void imu_mpu9250_reset(struct imu * imu)
 {
-	// reset device
-	imu->twrite(imu->ctx, PWR_MGMT_1, (uint8_t[]){0x80}, 1); // Write a one to bit 7 reset bit; toggle reset device
-	imu->sleep(imu->ctx, 100000000);
 }
 
 
