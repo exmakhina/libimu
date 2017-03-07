@@ -15,11 +15,14 @@
 #include <imu_mpu9250.i>
 
 //#define DEBUG_SPI
+//#define DEBUG_SLEEP
 
 static int imut_sleep(imu_ctx_t ctx, int64_t dt)
 {
 	int res;
+#if defined(DEBUG_SLEEP)
 	printf("sleep %" PRIu64 " µs\n", dt/(uint64_t)1000);
+#endif
 	struct timespec request;
 	request.tv_sec = dt / (uint64_t)1000000000;
 	request.tv_nsec = dt % (uint64_t)1000000000;
