@@ -32,7 +32,7 @@ static int imut_sleep(imu_ctx_t ctx, int64_t dt)
 }
 
 
-int imut_read(imu_ctx_t ctx, int reg, uint8_t * buf, int buflen)
+int imut_read(imu_ctx_t ctx, int addr, int reg, uint8_t * buf, int buflen)
 {
 	struct ftdispi_context * fsc = (struct ftdispi_context*)ctx;
 	int res;
@@ -52,7 +52,7 @@ int imut_read(imu_ctx_t ctx, int reg, uint8_t * buf, int buflen)
 }
 
 
-int imut_write(imu_ctx_t ctx, int reg, uint8_t const * buf, int buflen)
+int imut_write(imu_ctx_t ctx, int addr, int reg, uint8_t const * buf, int buflen)
 {
 	struct ftdispi_context * fsc = (struct ftdispi_context*)ctx;
 	int res;
@@ -123,6 +123,7 @@ int main(int argc, char **argv)
 	struct imu * imu = (struct imu*)&theimu;
 	struct ftdi_context fc;
 	struct ftdispi_context fsc;
+	memset(&theimu, 0, sizeof(theimu));
 	imu->ctx = &fsc;
 	imu->sleep = imut_sleep;
 	imu->tread = imut_read;

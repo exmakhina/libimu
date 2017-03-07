@@ -30,6 +30,10 @@ enum Mscale {
  MFS_16BITS,
 };
 
+enum IMU_MPU9250_FLAGS {
+ IMU_MPU9250_I2C_SHARED=0,
+};
+
 /*! Allocate one of these and call imp_mpu9250_init() on it.
     You don't *need* to touch anything inside.
 */
@@ -52,6 +56,9 @@ struct imu_mpu9250 {
 	int16_t temp_data;
 	int16_t temp_offset;
 	//! \}
+
+	//! Bitwise combination of IMU_MPU9250_FLAGS
+	unsigned flags;
 
 	uint8_t Mmode; // Either 8 Hz (0x02) or 100 Hz (0x06) magnetometer data ODR
 

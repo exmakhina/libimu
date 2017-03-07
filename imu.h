@@ -31,9 +31,9 @@ struct imu; // fwd, see later
 //! User-supplied function that would perform a sleep
 typedef int (imut_sleep_t)(imu_ctx_t, imu_reltime_t dt);
 
-typedef int (imut_read_t)(imu_ctx_t, int reg, uint8_t * buf, int buflen);
+typedef int (imut_read_t)(imu_ctx_t, int addr, int reg, uint8_t * buf, int buflen);
 
-typedef int (imut_write_t)(imu_ctx_t, int reg, uint8_t const * buf, int buflen);
+typedef int (imut_write_t)(imu_ctx_t, int addr, int reg, uint8_t const * buf, int buflen);
 
 typedef int (imut_now_t)(imu_ctx_t, imu_abstime_t * now);
 

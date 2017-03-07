@@ -21,7 +21,7 @@
 
 #include "imu_mpu9250.h"
 
-//#define IMU_DEBUG
+#define IMU_DEBUG
 
 #if defined(IMU_DEBUG)
 # include <stdio.h>
@@ -86,7 +86,7 @@ IMU_EXPORT int imu_mpu9250_read_acc(struct imu * imu)
 	int res;
 
 	uint8_t rawData[6];
-	res = imu->tread(imu->ctx, ACCEL_XOUT_H, &rawData[0], sizeof(rawData));
+	res = imu->tread(imu->ctx, MPU9250_ADDRESS, ACCEL_XOUT_H, &rawData[0], sizeof(rawData));
 	self->acc_data[0] = ((int16_t)rawData[0] << 8) | rawData[1];
 	self->acc_data[1] = ((int16_t)rawData[2] << 8) | rawData[3];
 	self->acc_data[2] = ((int16_t)rawData[4] << 8) | rawData[5];
@@ -99,7 +99,7 @@ IMU_EXPORT int imu_mpu9250_read_gyr(struct imu * imu)
 	int res;
 
 	uint8_t rawData[6];
-	res = imu->tread(imu->ctx, GYRO_XOUT_H, &rawData[0], sizeof(rawData));
+	res = imu->tread(imu->ctx, MPU9250_ADDRESS, GYRO_XOUT_H, &rawData[0], sizeof(rawData));
 	self->gyr_data[0] = ((int16_t)rawData[0] << 8) | rawData[1];
 	self->gyr_data[1] = ((int16_t)rawData[2] << 8) | rawData[3];
 	self->gyr_data[2] = ((int16_t)rawData[4] << 8) | rawData[5];
@@ -113,7 +113,7 @@ IMU_EXPORT int imu_mpu9250_read_acc_gyr(struct imu * imu)
 	int res;
 
 	uint8_t rawData[14];
-	res = imu->tread(imu->ctx, ACCEL_XOUT_H, &rawData[0], sizeof(rawData));
+	res = imu->tread(imu->ctx, MPU9250_ADDRESS, ACCEL_XOUT_H, &rawData[0], sizeof(rawData));
 	self->acc_data[0] = ((int16_t)rawData[0] << 8) | rawData[1];
 	self->acc_data[1] = ((int16_t)rawData[2] << 8) | rawData[3];
 	self->acc_data[2] = ((int16_t)rawData[4] << 8) | rawData[5];
@@ -124,8 +124,9 @@ IMU_EXPORT int imu_mpu9250_read_acc_gyr(struct imu * imu)
 	return res;
 }
 
-
-
+/*!
+  Read the magnetometer throught the MPU I2C master interface
+ */
 IMU_EXPORT int imu_mpu9250_tread_mag(struct imu * imu,
  uint8_t reg, uint8_t * buf, int count)
 {
@@ -133,54 +134,61 @@ IMU_EXPORT int imu_mpu9250_tread_mag(struct imu * imu,
 	int res;
 	uint8_t val;
 
+	if ((self->flags & BIT(IMU_MPU9250_I2C_SHARED)) == 0) {
+
 #if !defined(IMU_MPU9250_MAGACCESS_OPTIMIZE_FAVOR_R)
-	val = AK8963_ADDRESS | BIT(7);
-	imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, 1);
+		val = AK8963_ADDRESS | BIT(7);
+		imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_ADDR, &val, 1);
 #else
-	/* Note that we're already set to read */
+		/* Note that we're already set to read */
 #endif
 
 #if defined(IMU_MPU9250_MAGREAD_OPTIMIZED2)
-	/* clear read interrupt, will use it to know when data is ready*/
-	imu->tread(imu->ctx, INT_STATUS, &val, sizeof(val));
+		/* clear read interrupt, will use it to know when data is ready*/
+		imu->tread(imu->ctx, MPU9250_ADDRESS, INT_STATUS, &val, sizeof(val));
 #endif
 
-	imu->twrite(imu->ctx, I2C_SLV0_REG, &reg, sizeof(reg));
+		imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_REG, &reg, sizeof(reg));
 
-	val = 0x80 | count;
-	imu->twrite(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
+		val = 0x80 | count;
+		imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_CTRL, &val, sizeof(val));
 
 #if defined(IMU_MPU9250_MAGREAD_OPTIMIZED)
-	/*
-	  § 4.18 Register 54 – I C Master Status
+		/*
+		  § 4.18 Register 54 – I C Master Status
 
-	  TODO:
-	  “I2C_SLV0_NACK [...] will cause an interrupt if bit
-	  I2C_MST_INT_EN in the INT_ENABLE register is asserted”
-	 */
-	do {
-		imu->tread(imu->ctx, I2C_MST_STATUS, &val, sizeof(val));
-		if ((val & BIT(0)) != 0) {
-			break;
-		}
-	} while (1);
+		  TODO:
+		  “I2C_SLV0_NACK [...] will cause an interrupt if bit
+		  I2C_MST_INT_EN in the INT_ENABLE register is asserted”
+		*/
+		do {
+			imu->tread(imu->ctx, MPU9250_ADDRESS, I2C_MST_STATUS, &val, sizeof(val));
+			if ((val & BIT(0)) != 0) {
+				break;
+			}
+		} while (1);
 #else
-	imu->sleep(imu->ctx, (imu_abstime_t)20000 * (2+count) + 30000);
+		imu->sleep(imu->ctx, (imu_abstime_t)20000 * (2+count) + 30000);
 #endif
 
 #if 1 /* This is doing something very magical */
-	val = 0;
-	imu->twrite(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
+		val = 0;
+		imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_CTRL, &val, sizeof(val));
+		//imu->sleep(imu->ctx, (imu_abstime_t)1000000);
 #endif
 
-	res = imu->tread(imu->ctx, EXT_SENS_DATA_00, buf, count);
+		res = imu->tread(imu->ctx, MPU9250_ADDRESS, EXT_SENS_DATA_00, buf, count);
 
 
 #if defined(IMU_MPU9250_MAGACCESS_RB)
-	imu->tread(imu->ctx, I2C_SLV0_ADDR, &val, sizeof(val));
-	imu->tread(imu->ctx, I2C_SLV0_REG, &val, sizeof(val));
-	imu->tread(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
+		imu->tread(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_ADDR, &val, sizeof(val));
+		imu->tread(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_REG, &val, sizeof(val));
+		imu->tread(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_CTRL, &val, sizeof(val));
 #endif
+	}
+	else {
+		res = imu->tread(imu->ctx, AK8963_ADDRESS, reg, buf, count);
+	}
 
 	return res;
 }
@@ -193,16 +201,16 @@ IMU_EXPORT int imu_mpu9250_twrite_mag(struct imu * imu,
 
 	// set to write
 	val = AK8963_ADDRESS;
-	imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, sizeof(val));
-	imu->twrite(imu->ctx, I2C_SLV0_REG, &reg, sizeof(reg));
-	imu->twrite(imu->ctx, I2C_SLV0_DO, &buf[0], 1);
+	imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_ADDR, &val, sizeof(val));
+	imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_REG, &reg, sizeof(reg));
+	imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_DO, &buf[0], 1);
 	val = 0x80 | count;
-	imu->twrite(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
+	imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_CTRL, &val, sizeof(val));
 
 #if defined(IMU_MPU9250_MAGACCESS_OPTIMIZE_FAVOR_R)
 	// go back to read mode
 	val = AK8963_ADDRESS | BIT(7);
-	imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, sizeof(val));
+	imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_ADDR, &val, sizeof(val));
 #endif
 
 	//TODO readback?
@@ -222,6 +230,7 @@ IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 		imu_mpu9250_tread_mag(imu, AK8963_ST1, &val, sizeof(val));
 		if ((val & BIT(0)) == 0) {
 			imu_warn("Mag data not ready yet (%02x)\n", val);
+			return -1;
 			//continue;
 		}
 		break;
@@ -250,7 +259,7 @@ IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 #else /* !!defined(IMU_MPU9250_MAGACCESS_AUTOMATIC) */
 
 	uint8_t buf[8];
-	res = imu->tread(imu->ctx, EXT_SENS_DATA_00, buf, sizeof(buf));
+	res = imu->tread(imu->ctx, MPU9250_ADDRESS, EXT_SENS_DATA_00, buf, sizeof(buf));
 
 	uint8_t st1 = buf[0];
 	if ((st1 & BIT(0)) == 0) {
@@ -285,7 +294,7 @@ int imu_mpu9250_read_temp(struct imu * imu)
 	int res = 0;
 	uint8_t rawData[2];
 	imu->now(imu->ctx, &self->t_temp);
-	res = imu->tread(imu->ctx, TEMP_OUT_H, &rawData[0], 2);
+	res = imu->tread(imu->ctx, MPU9250_ADDRESS, TEMP_OUT_H, &rawData[0], 2);
 	self->temp_data = ((int16_t)rawData[0]) << 8 | rawData[1];
 	return res;
 }
@@ -305,7 +314,7 @@ IMU_EXPORT int imu_mpu9250_read_acc_gyr_mag(struct imu * imu)
 #endif
 
 	uint8_t buf[22];
-	res = imu->tread(imu->ctx, ACCEL_XOUT_H, &buf[0], sizeof(buf));
+	res = imu->tread(imu->ctx, MPU9250_ADDRESS, ACCEL_XOUT_H, &buf[0], sizeof(buf));
 	self->acc_data[0] = ((int16_t)buf[0] << 8) | buf[1];
 	self->acc_data[1] = ((int16_t)buf[2] << 8) | buf[3];
 	self->acc_data[2] = ((int16_t)buf[4] << 8) | buf[5];
@@ -349,7 +358,7 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	imu_debug("Check who am I\n");
 	uint8_t val = 0;
 	{
-		res = imu->tread(imu->ctx, WHO_AM_I_MPU9250, &val, sizeof(val));
+		res = imu->tread(imu->ctx, MPU9250_ADDRESS, WHO_AM_I_MPU9250, &val, sizeof(val));
 		if (res != 0) {
 			return -2;
 		}
@@ -360,25 +369,25 @@ static int imu_mpu9250_initialize(struct imu * imu)
 
 	imu_debug("Wake up device, reset everything\n");
 	val = BIT(7);
-	imu->twrite(imu->ctx, PWR_MGMT_1, &val, sizeof(val));
+	imu->twrite(imu->ctx, MPU9250_ADDRESS, PWR_MGMT_1, &val, sizeof(val));
 
 	/* default value is fine */
 	//val = BIT(0);
-	//imu->twrite(imu->ctx, PWR_MGMT_1, &val, sizeof(val));
+	//imu->twrite(imu->ctx, MPU9250_ADDRESS, PWR_MGMT_1, &val, sizeof(val));
 
 	val = 0;
-	imu->twrite(imu->ctx, PWR_MGMT_2, &val, sizeof(val));
+	imu->twrite(imu->ctx, MPU9250_ADDRESS, PWR_MGMT_2, &val, sizeof(val));
 
 	imu_debug("Enable interrupts for raw data only\n");
 	val = 0;
 	val |= BIT(0); /* enable raw data ready interrupt only */
-	imu->twrite(imu->ctx, INT_ENABLE, &val, 1);
+	imu->twrite(imu->ctx, MPU9250_ADDRESS, INT_ENABLE, &val, 1);
 
 	/*
 	   Wait for something curious to clear...
 	*/
 	for (int i = 0; i < 100; i++) {
-		imu->tread(imu->ctx, INT_STATUS, &val, sizeof(val));
+		imu->tread(imu->ctx, MPU9250_ADDRESS, INT_STATUS, &val, sizeof(val));
 		if (val != 0) {
 			imu_warn("INT_STATUS (%2x)?\n", val);
 		}
@@ -396,12 +405,12 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	val = 0;
 	val |= BIT(5); /* LATCH_INT_EN */
 	val |= BIT(1); /* I2C master pins bypass mode if disabled */
-	imu->twrite(imu->ctx, INT_PIN_CFG, &val, sizeof(val));
+	imu->twrite(imu->ctx, MPU9250_ADDRESS, INT_PIN_CFG, &val, sizeof(val));
 
 	imu_debug("Configure internal clock as we don't care about DMP\n");
 	/* Ref: PS § 4.1 clocking / RM § 4.34 Register 107 – Power Management 1*/
 	val = 1; /* internal clock */
-	imu->twrite(imu->ctx, PWR_MGMT_1, &val, sizeof(val));
+	imu->twrite(imu->ctx, MPU9250_ADDRESS, PWR_MGMT_1, &val, sizeof(val));
 
 	imu_debug("Configure Gyro\n");
 	/*
@@ -409,14 +418,14 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	  - DLPF_CFG: don't care, we'll use the maximum available rate
 	*/
 	val = 0;
-	imu->twrite(imu->ctx, CONFIG, &val, sizeof(val));
+	imu->twrite(imu->ctx, MPU9250_ADDRESS, CONFIG, &val, sizeof(val));
 
 	/*
 	  Ref: RS § 4.4 Register 25 – Sample Rate Divider
 	 - max sample rate (don't care, as fchoice will be ...)
 	*/
 	val = 0;
-	imu->twrite(imu->ctx, SMPLRT_DIV, &val, sizeof(val));
+	imu->twrite(imu->ctx, MPU9250_ADDRESS, SMPLRT_DIV, &val, sizeof(val));
 
 
 	/*
@@ -425,7 +434,7 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	val = 0;
 	val |= self->Gscale << 3; /* range */
 	val |= BIT(1) | BIT(0); /* set FCHOICE=00 for no DLPF */
-	imu->twrite(imu->ctx, GYRO_CONFIG, &val, 1);
+	imu->twrite(imu->ctx, MPU9250_ADDRESS, GYRO_CONFIG, &val, 1);
 
 
 	imu_debug("Configure Accelerometer\n");
@@ -434,19 +443,19 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	*/
 	val = 0;
 	val |= self->Ascale <<3; /* range */
-	imu->twrite(imu->ctx, ACCEL_CONFIG, &val, 1);
+	imu->twrite(imu->ctx, MPU9250_ADDRESS, ACCEL_CONFIG, &val, 1);
 
 	val = 0;
 	val |= BIT(1) | BIT(0); /* accel_fchoice_b */
-	imu->twrite(imu->ctx, ACCEL_CONFIG2, &val, 1);
+	imu->twrite(imu->ctx, MPU9250_ADDRESS, ACCEL_CONFIG2, &val, 1);
 
 
 
 	{
 		imu_debug("Check interrupt workability\n");
 
-		imu->tread(imu->ctx, INT_STATUS, &val, sizeof(val));
-		imu->tread(imu->ctx, INT_STATUS, &val, sizeof(val));
+		imu->tread(imu->ctx, MPU9250_ADDRESS, INT_STATUS, &val, sizeof(val));
+		imu->tread(imu->ctx, MPU9250_ADDRESS, INT_STATUS, &val, sizeof(val));
 
 #if 0
 		if (val != 0) {
@@ -456,66 +465,71 @@ static int imu_mpu9250_initialize(struct imu * imu)
 #endif
 	}
 
-	/*
-	  Prepare communication with magnetometer
-	 */
-	{
-		imu_debug("Enable I2C master\n");
-		val = 0;
-		val |= BIT(5); /* I2C_MST_EN */
-		val |= BIT(4); /* Disable I2C slave */
-		// (https://www.invensense.com/developers/forums/topic/how-can-i-access-magak8953-with-spi/#post-36017)
-		imu->twrite(imu->ctx, USER_CTRL, &val, 1);
-
-		imu->sleep(imu->ctx, (imu_abstime_t)100000000);
+	if ((self->flags & BIT(IMU_MPU9250_I2C_SHARED)) == 0) {
 
 		/*
-		  WAIT_FOR_ES is not mandatory to get built-in I2C master function,
-		  TODO clarify what it would do.
-		 */
-		val = 0;
-		val |= BIT(6); /* WAIT_FOR_ES */
-		val |= BIT(4); /* start/msg/stop */
-		val |= 13; /* 400 kHz */
-		imu->twrite(imu->ctx, I2C_MST_CTRL, &val, 1);
+		  Prepare communication with magnetometer
+		*/
+		{
+			imu_debug("Enable I2C master\n");
+			val = 0;
+			val |= BIT(5); /* I2C_MST_EN */
+			val |= BIT(4); /* Disable I2C slave */
+			// (https://www.invensense.com/developers/forums/topic/how-can-i-access-magak8953-with-spi/#post-36017)
+			imu->twrite(imu->ctx, MPU9250_ADDRESS, USER_CTRL, &val, 1);
+
+			imu->sleep(imu->ctx, (imu_abstime_t)100000000);
+
+			/*
+			  WAIT_FOR_ES is not mandatory to get built-in I2C master function,
+			  TODO clarify what it would do.
+			*/
+			val = 0;
+			val |= BIT(6); /* WAIT_FOR_ES */
+			val |= BIT(4); /* start/msg/stop */
+			val |= 13; /* 400 kHz */
+			imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_MST_CTRL, &val, 1);
 
 #if defined(IMU_MPU9250_I_REALLY_WANT_TO_RESET_I2C_MST)
-		imu->tread(imu->ctx, USER_CTRL, &val, 1);
-		val |= BIT(1); /* I2C_MST_RST */
-		imu->twrite(imu->ctx, USER_CTRL, &val, 1);
+			imu->tread(imu->ctx, MPU9250_ADDRESS, USER_CTRL, &val, 1);
+			val |= BIT(1); /* I2C_MST_RST */
+			imu->twrite(imu->ctx, MPU9250_ADDRESS, USER_CTRL, &val, 1);
 #endif
 
-		imu_debug("Slave address + read\n");
+			imu_debug("Slave address + read\n");
 
 #if defined(IMU_MPU9250_MAGACCESS_OPTIMIZE_FAVOR_R)
-		/*
-		  Enable read of slave, by default.
-		  Writes are occasional and the write operation should reset
-		  I2C_SLV0_ADDR for a read.
-		*/
-		val = AK8963_ADDRESS | BIT(7);
-		imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, 1);
+			/*
+			  Enable read of slave, by default.
+			  Writes are occasional and the write operation should reset
+			  I2C_SLV0_ADDR for a read.
+			*/
+			val = AK8963_ADDRESS | BIT(7);
+			imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_ADDR, &val, 1);
 #endif
 
 #if 1
-		int err_count = 0;
-		for (int i = 0; i < 10; i++) {
-			imu_debug("Read whoami\n");
-			imu_mpu9250_tread_mag(imu, WHO_AM_I_AK8963, &val, 1);
-			if (val != 0x48) {
-				imu_debug("NG %d\n", val);
-				err_count++;
+			int err_count = 0;
+			for (int i = 0; i < 10; i++) {
+				imu_debug("Read whoami\n");
+				imu_mpu9250_tread_mag(imu, WHO_AM_I_AK8963, &val, 1);
+				if (val != 0x48) {
+					imu_debug("NG %d\n", val);
+					err_count++;
+				}
+				else {
+					imu_debug("\x1B[33;1mOK!\x1B[0m\n");
+				}
 			}
-			else {
-				imu_debug("\x1B[33;1mOK!\x1B[0m\n");
+			if (err_count > 0) {
+				return -3;
 			}
-		}
-		if (err_count > 0) {
-			return -3;
-		}
 #endif
+		}
 	}
-
+	else {
+		/* TODO? */
+	}
 
 	{
 		/*
@@ -536,15 +550,14 @@ static int imu_mpu9250_initialize(struct imu * imu)
 #if defined(IMU_MPU9250_MAGACCESS_AUTOMATIC)
 		imu_debug("Configure automatic readout by MPU-9250\n");
 		val = AK8963_ADDRESS | BIT(7); // Enable read
-		imu->twrite(imu->ctx, I2C_SLV0_ADDR, &val, sizeof(val));
+		imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_ADDR, &val, sizeof(val));
 		val = AK8963_ST1;
-		imu->twrite(imu->ctx, I2C_SLV0_REG, &val, sizeof(val));
+		imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_REG, &val, sizeof(val));
 		val = 0x80 | 8;
-		imu->twrite(imu->ctx, I2C_SLV0_CTRL, &val, sizeof(val));
+		imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_CTRL, &val, sizeof(val));
 
-		
 		//val = 0x80;
-		//imu->twrite(imu->ctx, I2C_MST_DELAY_CTRL, &val, sizeof(val));
+		//imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_MST_DELAY_CTRL, &val, sizeof(val));
 #endif
 
 	}
