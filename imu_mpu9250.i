@@ -2,9 +2,14 @@
   \file
   \brief Implementation of MPU-9250 transport
 
-  TODO:
-  - Make on-board I2C master interface work
-  - Support I2C bypass too
+  Notes:
+
+  - This code can work over SPI or I2C.
+
+  - Use single measurement mode to be able to use the magnetometer
+    at maximum speed, around 111 Hz in my tests.
+    It does not reduce the accuracy, as the magnetometer always uses
+    the same measurement period in all modes.
 
 */
 
@@ -43,8 +48,8 @@ IMU_EXPORT float imu_mpu9250_get_magres(uint8_t mag_scale)
 {
 	float const fs = 4912e-6f;
 	switch (mag_scale) {
-		case MFS_14BITS: return fs/8190.0;
-		case MFS_16BITS: return fs/32760.0;
+		case 0: return fs/8190.0;
+		case 1: return fs/32760.0;
 	}
 }
 
@@ -56,10 +61,10 @@ IMU_EXPORT float imu_mpu9250_get_magres(uint8_t mag_scale)
 IMU_EXPORT float imu_mpu9250_get_gyrres(uint8_t gyr_scale)
 {
 	switch (gyr_scale) {
-		case GFS_250DPS: return 250.0/32768.0*M_PI/180;
-		case GFS_500DPS: return 500.0/32768.0*M_PI/180;
-		case GFS_1000DPS: return 1000.0/32768.0*M_PI/180;
-		case GFS_2000DPS: return 2000.0/32768.0*M_PI/180;
+		case 0: return 250.0/32768.0*M_PI/180;
+		case 1: return 500.0/32768.0*M_PI/180;
+		case 2: return 1000.0/32768.0*M_PI/180;
+		case 3: return 2000.0/32768.0*M_PI/180;
 	}
 }
 
@@ -72,10 +77,10 @@ IMU_EXPORT float imu_mpu9250_get_accres(uint8_t acc_scale)
 {
 	float const g = 9.80665;
 	switch (acc_scale) {
-		case AFS_2G: return g*2.0/32768.0;
-		case AFS_4G: return g*4.0/32768.0;
-		case AFS_8G: return g*8.0/32768.0;
-		case AFS_16G: return g*16.0/32768.0;
+		case 0: return g*2.0/32768.0;
+		case 1: return g*4.0/32768.0;
+		case 2: return g*8.0/32768.0;
+		case 3: return g*16.0/32768.0;
 	}
 }
 
@@ -257,14 +262,14 @@ IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 	if ((self->flags & BIT(IMU_MPU9250_MAG_SINGLE)) != 0) {
 		/* reload */
 		val = 0;
-		val |= BIT(4); /* 16-bit */
+		val |= ((self->flags >> IMU_MPU9250_MAG_BITS) & BIT(0)) << 4;
 		val |= BIT(0); /* mode single measurement */
 		imu_mpu9250_twrite_mag(imu, AK8963_CNTL1, &val, sizeof(val));
 	}
 
 	uint8_t st2 = rawData[6]; /* check for overflow */
 #if 1
-	if ((st2 & BIT(4)) == 0) {
+	if ((st2 & BIT(4)) != ((self->flags >> IMU_MPU9250_MAG_BITS) & BIT(0)) << 4) {
 		imu_warn("Invalid st2 register contents (0x%02x), expecting 16-bit config\n", st2);
 		return -1;
 	}
@@ -291,7 +296,7 @@ IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 
 	uint8_t st2 = buf[7];
 #if 1
-	if ((st2 & BIT(4)) == 0) {
+	if ((st2 & BIT(4)) != ((self->flags >> IMU_MPU9250_MAG_BITS) & BIT(0)) << 4) {
 		imu_warn("Invalid st2 register contents (0x%02x), expecting 16-bit config\n", st2);
 		return -1;
 	}
@@ -456,7 +461,7 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	  Ref: RS § 4.6 Register 27 – Gyroscope Configuration
 	*/
 	val = 0;
-	val |= self->Gscale << 3; /* range */
+	val |= (self->flags >> IMU_MPU9250_GYR_RANGE) & (BIT(0)|BIT(1)) << 3;
 	val |= BIT(1) | BIT(0); /* set FCHOICE=00 for no DLPF */
 	imu->twrite(imu->ctx, MPU9250_ADDRESS, GYRO_CONFIG, &val, 1);
 
@@ -466,7 +471,7 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	  Ref: RS § 4.8 Register 29 – Accelerometer Configuration 2
 	*/
 	val = 0;
-	val |= self->Ascale <<3; /* range */
+	val |= (self->flags >> IMU_MPU9250_ACC_RANGE) & (BIT(0)|BIT(1)) << 3;
 	imu->twrite(imu->ctx, MPU9250_ADDRESS, ACCEL_CONFIG, &val, 1);
 
 	val = 0;
@@ -607,19 +612,23 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	}
 
 	{
-		self->acc_res = imu_mpu9250_get_accres(self->Ascale);
+		uint8_t bits;
+		bits = (self->flags >> IMU_MPU9250_ACC_RANGE) & (BIT(0)|BIT(1));
+		self->acc_res = imu_mpu9250_get_accres(bits);
 		for (int i = 0; i < 3; i++) {
 			self->acc_bias[i] = 0.f;
 			self->acc_gain[i] = self->acc_res;
 		}
 
-		self->gyr_res = imu_mpu9250_get_gyrres(self->Gscale);
+		bits = (self->flags >> IMU_MPU9250_GYR_RANGE) & (BIT(0)|BIT(1));
+		self->gyr_res = imu_mpu9250_get_gyrres(bits);
 		for (int i = 0; i < 3; i++) {
 			self->gyr_bias[i] = 0.f;
 			self->gyr_gain[i] = self->gyr_res;
 		}
 
-		self->mag_res = imu_mpu9250_get_magres(self->Mscale);
+		bits = (self->flags >> IMU_MPU9250_MAG_BITS) & (BIT(0)|BIT(1));
+		self->mag_res = imu_mpu9250_get_magres(bits);
 		for (int i = 0; i < 3; i++) {
 			self->mag_bias[i] = 0.f;
 			self->mag_gain[i] = self->mag_res;
@@ -770,13 +779,6 @@ IMU_EXPORT int imu_mpu9250_init(struct imu * imu)
 {
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
 	int res = 0;
-
-	// Configuration
-	self->Ascale = AFS_2G;
-	self->Gscale = GFS_250DPS;
-	self->Mscale = MFS_16BITS;
-	self->Mmode = 0x06;
-	self->temp_offset = 0;
 
 	// Initialize device
 	res = imu_mpu9250_initialize(imu);

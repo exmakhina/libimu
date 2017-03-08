@@ -11,33 +11,35 @@ extern "C" {
 
 #include "imu.h"
 
-enum Ascale {
- AFS_2G = 0,
- AFS_4G,
- AFS_8G,
- AFS_16G,
-};
-
-enum Gscale {
- GFS_250DPS = 0,
- GFS_500DPS,
- GFS_1000DPS,
- GFS_2000DPS,
-};
-
-enum Mscale {
- MFS_14BITS = 0,
- MFS_16BITS,
-};
-
 enum IMU_MPU9250_FLAGS {
  IMU_MPU9250_I2C_SHARED=0,
  IMU_MPU9250_MAG_SINGLE=1,
  IMU_MPU9250_MAG_WAIT=2,
+ IMU_MPU9250_MAG_BITS=3,
+ IMU_MPU9250_ACC_RANGE=4,
+ IMU_MPU9250_GYR_RANGE=6,
 };
 
-/*! Allocate one of these and call imp_mpu9250_init() on it.
-    You don't *need* to touch anything inside.
+enum IMU_MPU9250_ACC_RANGE {
+ IMU_MPU9250_ACC_RANGE_2G = 0*BIT(IMU_MPU9250_ACC_RANGE),
+ IMU_MPU9250_ACC_RANGE_4G = 1*BIT(IMU_MPU9250_ACC_RANGE),
+ IMU_MPU9250_ACC_RANGE_8G = 2*BIT(IMU_MPU9250_ACC_RANGE),
+ IMU_MPU9250_ACC_RANGE_16G = 3*BIT(IMU_MPU9250_ACC_RANGE),
+};
+
+enum IMU_MPU9250_GYR_RANGE {
+ IMU_MPU9250_GYR_RANGE_250DPS = 0*BIT(IMU_MPU9250_GYR_RANGE),
+ IMU_MPU9250_GYR_RANGE_500DPS = 1*BIT(IMU_MPU9250_GYR_RANGE),
+ IMU_MPU9250_GYR_RANGE_1000DPS = 2*BIT(IMU_MPU9250_GYR_RANGE),
+ IMU_MPU9250_GYR_RANGE_2000DPS = 3*BIT(IMU_MPU9250_GYR_RANGE),
+};
+
+enum IMU_MPU9250_MAG_BITS {
+ IMU_MPU9250_MAG_BITS_14 = 0*BIT(IMU_MPU9250_MAG_BITS),
+ IMU_MPU9250_MAG_BITS_16 = 1*BIT(IMU_MPU9250_MAG_BITS),
+};
+
+/*! Allocate one of these, touch it, and call imp_mpu9250_init() on it.
 */
 struct imu_mpu9250 {
 	struct imu base;
@@ -56,21 +58,16 @@ struct imu_mpu9250 {
 	//! \{
 	imu_abstime_t t_temp;
 	int16_t temp_data;
-	int16_t temp_offset;
 	//! \}
 
-	//! Bitwise combination of IMU_MPU9250_FLAGS
+	/*! Bitwise combination of IMU_MPU9250_FLAGS
+	*/
 	unsigned flags;
-
-	uint8_t Mmode; // Either 8 Hz (0x02) or 100 Hz (0x06) magnetometer data ODR
-
 
 	//! \name Stuff for conversion to engineering values
 	//! \{
 
-	uint8_t Ascale;
-	uint8_t Gscale;
-	uint8_t Mscale;
+	int16_t temp_offset;
 
 	float acc_res; // nominal gain (LSB to eng. unit)
 	float gyr_res;
