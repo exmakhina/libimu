@@ -21,11 +21,11 @@
 
 #include "imu_mpu9250.h"
 
-#define IMU_DEBUG
+//#define IMU_DEBUG
 
 #if defined(IMU_DEBUG)
 # include <stdio.h>
-# define imu_debug(...)
+# define imu_debug(...) printf(__VA_ARGS__)
 # define imu_warn(...) fprintf(stderr, __VA_ARGS__)
 #else
 # define imu_debug(fmt, ...)
@@ -197,24 +197,29 @@ IMU_EXPORT int imu_mpu9250_twrite_mag(struct imu * imu,
  uint8_t reg, uint8_t * buf, int count)
 {
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
+	int res;
 	uint8_t val;
+	if ((self->flags & BIT(IMU_MPU9250_I2C_SHARED)) == 0) {
 
-	// set to write
-	val = AK8963_ADDRESS;
-	imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_ADDR, &val, sizeof(val));
-	imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_REG, &reg, sizeof(reg));
-	imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_DO, &buf[0], 1);
-	val = 0x80 | count;
-	imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_CTRL, &val, sizeof(val));
+		// set to write
+		val = AK8963_ADDRESS;
+		res = imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_ADDR, &val, sizeof(val));
+		res = imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_REG, &reg, sizeof(reg));
+		res = imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_DO, &buf[0], 1);
+		val = 0x80 | count;
+		res = imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_CTRL, &val, sizeof(val));
 
 #if defined(IMU_MPU9250_MAGACCESS_OPTIMIZE_FAVOR_R)
-	// go back to read mode
-	val = AK8963_ADDRESS | BIT(7);
-	imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_ADDR, &val, sizeof(val));
+		// go back to read mode
+		val = AK8963_ADDRESS | BIT(7);
+		res = imu->twrite(imu->ctx, MPU9250_ADDRESS, I2C_SLV0_ADDR, &val, sizeof(val));
 #endif
-
+	}
+	else {
+		res = imu->twrite(imu->ctx, AK8963_ADDRESS, reg, buf, count);
+	}
 	//TODO readback?
-	return 0;
+	return res;
 }
 
 
@@ -223,11 +228,16 @@ IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 	struct imu_mpu9250 * self = (struct imu_mpu9250*)imu;
 	int res = 0;
 
+
 #if !defined(IMU_MPU9250_MAGACCESS_AUTOMATIC)
 
 	do {
 		uint8_t val;
-		imu_mpu9250_tread_mag(imu, AK8963_ST1, &val, sizeof(val));
+		res = imu_mpu9250_tread_mag(imu, AK8963_ST1, &val, sizeof(val));
+		if (res != 0) {
+			imu_warn("Mag couldn't be read: %d\n", res);
+			return -2;
+		}
 		if ((val & BIT(0)) == 0) {
 			imu_warn("Mag data not ready yet (%02x)\n", val);
 			return -1;
@@ -360,9 +370,11 @@ static int imu_mpu9250_initialize(struct imu * imu)
 	{
 		res = imu->tread(imu->ctx, MPU9250_ADDRESS, WHO_AM_I_MPU9250, &val, sizeof(val));
 		if (res != 0) {
+			imu_warn("Cannot read: %d\n", res);
 			return -2;
 		}
 		if (val != 0x71) {
+			imu_warn("Invalid contents\n");
 			return -1;
 		}
 	}
@@ -514,7 +526,7 @@ static int imu_mpu9250_initialize(struct imu * imu)
 				imu_debug("Read whoami\n");
 				imu_mpu9250_tread_mag(imu, WHO_AM_I_AK8963, &val, 1);
 				if (val != 0x48) {
-					imu_debug("NG %d\n", val);
+					imu_debug("\x1B[31;1mNG %d\x1B[0m\n", val);
 					err_count++;
 				}
 				else {
@@ -528,6 +540,22 @@ static int imu_mpu9250_initialize(struct imu * imu)
 		}
 	}
 	else {
+		int err_count = 0;
+		for (int i = 0; i < 10; i++) {
+			imu_debug("Read whoami\n");
+			imu->tread(imu->ctx, AK8963_ADDRESS, WHO_AM_I_AK8963, &val, 1);
+			if (val != 0x48) {
+				imu_debug("\x1B[31;1mNG %d\x1B[0m\n", val);
+				err_count++;
+			}
+			else {
+				imu_debug("\x1B[33;1mOK!\x1B[0m\n");
+			}
+		}
+		if (err_count > 0) {
+			return -3;
+		}
+
 		/* TODO? */
 	}
 
@@ -543,7 +571,6 @@ static int imu_mpu9250_initialize(struct imu * imu)
 		imu_debug("Continuous measurement in 16bit\n");
 		val = 0;
 		val |= BIT(4); /* 16-bit */
-
 		val |= BIT(2)|BIT(1); /* continuous measurement mode 100 Hz */
 		imu_mpu9250_twrite_mag(imu, AK8963_CNTL1, &val, sizeof(val));
 
