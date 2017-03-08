@@ -12,12 +12,13 @@ extern "C" {
 #include "imu.h"
 
 enum IMU_MPU9250_FLAGS {
- IMU_MPU9250_I2C_SHARED=0,
- IMU_MPU9250_MAG_SINGLE=1,
- IMU_MPU9250_MAG_WAIT=2,
- IMU_MPU9250_MAG_BITS=3,
- IMU_MPU9250_ACC_RANGE=4,
- IMU_MPU9250_GYR_RANGE=6,
+ IMU_MPU9250_I2C_SHARED=0, /* use shared I2C bus (vs. proxy via I2C master interface) */
+ IMU_MPU9250_MAG_SINGLE=1, /* perform single measurement instead of many */
+ IMU_MPU9250_MAG_WAIT=2, /* wait, don't return, when magnetometer is not ready */
+ IMU_MPU9250_MAG_BITS=3, /* see corresponding enum */
+ IMU_MPU9250_ACC_RANGE=4, /* see corresponding enum */
+ IMU_MPU9250_GYR_RANGE=6, /* see corresponding enum */
+ IMU_MPU9250_CALIBRATED=8, /* means: please don't touch the calibration the user dit it */
 };
 
 enum IMU_MPU9250_ACC_RANGE {
@@ -60,7 +61,7 @@ struct imu_mpu9250 {
 	int16_t temp_data;
 	//! \}
 
-	/*! Bitwise combination of IMU_MPU9250_FLAGS
+	/*! Configuration variable: bitwise combination of IMU_MPU9250_FLAGS
 	*/
 	unsigned flags;
 

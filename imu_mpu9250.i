@@ -615,23 +615,29 @@ static int imu_mpu9250_initialize(struct imu * imu)
 		uint8_t bits;
 		bits = (self->flags >> IMU_MPU9250_ACC_RANGE) & (BIT(0)|BIT(1));
 		self->acc_res = imu_mpu9250_get_accres(bits);
-		for (int i = 0; i < 3; i++) {
-			self->acc_bias[i] = 0.f;
-			self->acc_gain[i] = self->acc_res;
+		if ((self->flags & BIT(IMU_MPU9250_CALIBRATED)) == 0) {
+			for (int i = 0; i < 3; i++) {
+				self->acc_bias[i] = 0.f;
+				self->acc_gain[i] = self->acc_res;
+			}
 		}
 
 		bits = (self->flags >> IMU_MPU9250_GYR_RANGE) & (BIT(0)|BIT(1));
 		self->gyr_res = imu_mpu9250_get_gyrres(bits);
-		for (int i = 0; i < 3; i++) {
-			self->gyr_bias[i] = 0.f;
-			self->gyr_gain[i] = self->gyr_res;
+		if ((self->flags & BIT(IMU_MPU9250_CALIBRATED)) == 0) {
+			for (int i = 0; i < 3; i++) {
+				self->gyr_bias[i] = 0.f;
+				self->gyr_gain[i] = self->gyr_res;
+			}
 		}
 
 		bits = (self->flags >> IMU_MPU9250_MAG_BITS) & (BIT(0)|BIT(1));
 		self->mag_res = imu_mpu9250_get_magres(bits);
-		for (int i = 0; i < 3; i++) {
-			self->mag_bias[i] = 0.f;
-			self->mag_gain[i] = self->mag_res;
+		if ((self->flags & BIT(IMU_MPU9250_CALIBRATED)) == 0) {
+			for (int i = 0; i < 3; i++) {
+				self->mag_bias[i] = 0.f;
+				self->mag_gain[i] = self->mag_res;
+			}
 		}
 	}
 
