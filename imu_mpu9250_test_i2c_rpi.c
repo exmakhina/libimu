@@ -1,21 +1,30 @@
 /*
   \file
 
-  \brief Example using libftdispi and a SPI-connected MPU-9250
-  (to make things interesting).
+  \brief Example using a raspberry Pi and a I2C-connected MPU-9250
 
 */
 
 #include <inttypes.h>
 #include <time.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
-#include <ftdispi.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>    /* For O_RDWR */
+#include <unistd.h>   /* For open(), creat() */
+#include <linux/i2c-dev.h>
 
 #include <imu_mpu9250.i>
 
-//#define DEBUG_SPI
+//#define DEBUG_I2C
 //#define DEBUG_SLEEP
+
+struct ctx {
+	int fd_i2c;
+	int addr;
+};
 
 static int imut_sleep(imu_ctx_t ctx, int64_t dt)
 {
@@ -31,61 +40,101 @@ static int imut_sleep(imu_ctx_t ctx, int64_t dt)
 	return res;
 }
 
-
-int imut_read(imu_ctx_t ctx, int addr, int reg, uint8_t * buf, int buflen)
+static int imut_i2c_set_slave(imu_ctx_t _ctx, int address)
 {
-	struct ftdispi_context * fsc = (struct ftdispi_context*)ctx;
+	struct ctx * ctx = (struct ctx*)_ctx;
+	int res = 0;
+
+	if (ctx->addr != address) {
+		res = ioctl(ctx->fd_i2c, I2C_SLAVE, address);
+		if (res < 0) {
+			fprintf(stderr, "Setting address failed: %d %d\n", res, errno);
+		}
+		else {
+			ctx->addr = address;
+		}
+	}
+
+	return res;
+
+}
+
+
+static int imut_read(imu_ctx_t _ctx, int addr, int reg, uint8_t * buf, int buflen)
+{
+	struct ctx * ctx = (struct ctx*)_ctx;
 	int res;
 
-#if defined(DEBUG_SPI)
-	printf("spiget 0x%02x", reg);
+#if defined(DEBUG_I2C)
+	printf("i2cget(%p) 0x%02x 0x%02x", ctx, addr, reg);
 #endif
-	uint8_t const txbuf[] = { (1<<7) | reg };
-	res = ftdispi_write_read(fsc, txbuf, sizeof(txbuf), buf, buflen, 0);
-#if defined(DEBUG_SPI)
+
+	res = imut_i2c_set_slave(_ctx, addr);
+	if (res != 0) {
+		return -3;
+	}
+
+	uint8_t const txbuf[] = { reg };
+	res = write(ctx->fd_i2c, txbuf, sizeof(txbuf));
+	if (res != 1) {
+		fprintf(stderr, "Cannot write register\n");
+		return -1;
+	}
+	res = read(ctx->fd_i2c, buf, buflen);
+	if (res != buflen) {
+		fprintf(stderr, "Cannot read data\n");
+		return -2;
+	}
+#if defined(DEBUG_I2C)
+	printf(" (%d)", res);
 	for (int i = 0; i < buflen; i++) {
 		printf(" 0x%02x", buf[i]);
 	}
 	printf("\n");
 #endif
-	return res;
+	return 0;
 }
 
 
-int imut_write(imu_ctx_t ctx, int addr, int reg, uint8_t const * buf, int buflen)
+static int imut_write(imu_ctx_t _ctx, int addr, int reg, uint8_t const * buf, int buflen)
 {
-	struct ftdispi_context * fsc = (struct ftdispi_context*)ctx;
+	struct ctx * ctx = (struct ctx*)_ctx;
 	int res;
 
-#if defined(DEBUG_SPI)
-	printf("spiset 0x%02x", reg);
+#if defined(DEBUG_I2C)
+	printf("i2cset(%p) 0x%02x 0x%02x", ctx, addr, reg);
 #endif
 
-#if defined(DOESNT_WORK)
-	uint8_t const txbuf[] = { (0<<7) | reg };
-	res = ftdispi_write(fsc, txbuf, sizeof(txbuf), 0);
-	res = ftdispi_write(fsc, buf, buflen, 0);
-#else
+	res = imut_i2c_set_slave(_ctx, addr);
+	if (res != 0) {
+		return -3;
+	}
+
 	uint8_t * buf_tx = malloc(buflen+1);
-	buf_tx[0] = (0<<7) | reg;
+	buf_tx[0] = reg;
 	memcpy(&buf_tx[1], buf, buflen);
-	res = ftdispi_write(fsc, buf_tx, buflen+1, 0);
+	res = write(ctx->fd_i2c, buf_tx, buflen+1);
+	if (res != buflen+1) {
+		fprintf(stderr, "Cannot write data\n");
+		return -1;
+	}
 	free(buf_tx);
-#endif
-
-#if defined(DEBUG_SPI)
+#if defined(DEBUG_I2C)
 	for (int i = 0; i < buflen; i++) {
 		printf(" 0x%02x", buf[i]);
 	}
 #endif
 
+#define DEBUG_READBACK
 #if defined(DEBUG_READBACK)
 	{
-		uint8_t const txbuf[] = { (1<<7) | reg };
+		uint8_t const txbuf[] = { reg };
 		printf(" rb ");
 		//usleep(100000);
 		uint8_t * buf_rb = malloc(buflen);
-		res = ftdispi_write_read(fsc, txbuf, sizeof(txbuf), buf_rb, buflen, 0);
+		res = write(ctx->fd_i2c, &txbuf[0], sizeof(txbuf));
+		res = read(ctx->fd_i2c, buf_rb, buflen);
+		res = 0;
 		printf(" (%d)", res);
 		for (int i = 0; i < buflen; i++) {
 			if (buf_rb[i] != buf[i]) {
@@ -98,14 +147,14 @@ int imut_write(imu_ctx_t ctx, int addr, int reg, uint8_t const * buf, int buflen
 	}
 #endif
 
-#if defined(DEBUG_SPI)
+#if defined(DEBUG_I2C)
 	printf("\n");
 #endif
-	return res;
+	return 0;
 }
 
 
-int imut_now(imu_ctx_t ctx, imu_abstime_t * now)
+static int imut_now(imu_ctx_t ctx, imu_abstime_t * now)
 {
 	struct timespec ts;
 	int res;
@@ -121,41 +170,31 @@ int main(int argc, char **argv)
 	int res;
 	struct imu_mpu9250 theimu;
 	struct imu * imu = (struct imu*)&theimu;
-	struct ftdi_context fc;
-	struct ftdispi_context fsc;
-	memset(&theimu, 0, sizeof(theimu));
-	imu->ctx = &fsc;
+
+	struct ctx ctx = {
+	 .fd_i2c = -1,
+	 .addr = 0,
+	};
+
+	ctx.fd_i2c = open("/dev/i2c-1", O_RDWR);
+	if (ctx.fd_i2c < 0) {
+		fprintf(stderr, "Cannot open I2C device file\n");
+		return -1;
+	}
+	printf("fd: %d\n", ctx.fd_i2c);
+
+	imu->ctx = &ctx;
 	imu->sleep = imut_sleep;
 	imu->tread = imut_read;
 	imu->twrite = imut_write;
 	imu->now = imut_now;
-
-	int i;
-
-	if (ftdi_init(&fc) < 0) {
-		fprintf(stderr, "ftdi_init failed\n");
-		return 1;
-	}
-	i = ftdi_usb_open(&fc, 0x0403, 0x6010);
-	if (i < 0 && i != -5) {
-		fprintf(stderr, "OPEN: %s\n", ftdi_get_error_string(&fc));
-		exit(-1);
-	}
-
-	// TODO mode 3 CPOL=1 CPHA=1... but I have to use this to make it work
-	ftdispi_open(&fsc, &fc, INTERFACE_A);
-	ftdispi_setmode(&fsc, /*cs*/1, /*cpol*/0, /*cpha*/0, /*lsbfirst*/0, /*bitmod*/0, /*gpo*/ 0);
-	ftdispi_setclock(&fsc, 1000000);
-	ftdispi_setloopback(&fsc, 0);
-
+	(&theimu)->flags = BIT(IMU_MPU9250_I2C_SHARED);
 
 	res = imu_mpu9250_init(imu);
 	if (res != 0) {
 		fprintf(stderr, "Chip unreachable: %d\n", res);
 		goto end;
 	}
-
-	ftdispi_setclock(&fsc, 1000000);
 
 	printf("poll\n");
 	while (1) {
@@ -204,7 +243,6 @@ int main(int argc, char **argv)
 	}
 
 end:
-	ftdispi_close(&fsc, 1);
 
 	printf("Returning %d\n", res);
 	return res;

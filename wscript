@@ -66,3 +66,19 @@ def build(bld):
 			 lib="ftdi",
 			)
 
+		if 0:
+			bld(
+			 target="imu_mpu9250_test_i2c",
+			 features="c cprogram",
+			 includes=[bld.path.abspath()],
+			 source=["imu_mpu9250_test_i2c.c", "ftdii2c.c", "ftdicommon.c"],
+			 lib="ftdi",
+			)
+
+		if 0:
+			bld(
+			 target="imu_mpu9250_test_i2c_rpi",
+			 features="c cprogram",
+			 includes=[bld.path.abspath()],
+			 source=["imu_mpu9250_test_i2c_rpi.c"],
+			)
