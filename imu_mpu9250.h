@@ -32,6 +32,8 @@ enum Mscale {
 
 enum IMU_MPU9250_FLAGS {
  IMU_MPU9250_I2C_SHARED=0,
+ IMU_MPU9250_MAG_SINGLE=1,
+ IMU_MPU9250_MAG_WAIT=2,
 };
 
 /*! Allocate one of these and call imp_mpu9250_init() on it.

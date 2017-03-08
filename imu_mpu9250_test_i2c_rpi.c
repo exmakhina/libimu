@@ -125,7 +125,7 @@ static int imut_write(imu_ctx_t _ctx, int addr, int reg, uint8_t const * buf, in
 	}
 #endif
 
-#define DEBUG_READBACK
+//#define DEBUG_READBACK
 #if defined(DEBUG_READBACK)
 	{
 		uint8_t const txbuf[] = { reg };
@@ -189,6 +189,8 @@ int main(int argc, char **argv)
 	imu->twrite = imut_write;
 	imu->now = imut_now;
 	(&theimu)->flags = BIT(IMU_MPU9250_I2C_SHARED);
+	(&theimu)->flags |= BIT(IMU_MPU9250_MAG_SINGLE);
+	(&theimu)->flags |= BIT(IMU_MPU9250_MAG_WAIT);
 
 	res = imu_mpu9250_init(imu);
 	if (res != 0) {
@@ -205,7 +207,7 @@ int main(int argc, char **argv)
 		res = imu->poll(imu, flags);
 
 		if (res != 0) {
-			continue;
+			/* continue; */
 		}
 
 		if (0) {

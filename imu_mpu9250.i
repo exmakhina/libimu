@@ -230,9 +230,9 @@ IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 
 
 #if !defined(IMU_MPU9250_MAGACCESS_AUTOMATIC)
+	uint8_t val;
 
 	do {
-		uint8_t val;
 		res = imu_mpu9250_tread_mag(imu, AK8963_ST1, &val, sizeof(val));
 		if (res != 0) {
 			imu_warn("Mag couldn't be read: %d\n", res);
@@ -240,8 +240,12 @@ IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 		}
 		if ((val & BIT(0)) == 0) {
 			imu_warn("Mag data not ready yet (%02x)\n", val);
-			return -1;
-			//continue;
+			if ((self->flags & BIT(IMU_MPU9250_MAG_WAIT)) != 0) {
+				continue;
+			}
+			else {
+				return -1;
+			}
 		}
 		break;
 	} while (1);
@@ -249,6 +253,14 @@ IMU_EXPORT int imu_mpu9250_read_mag(struct imu * imu)
 	uint8_t rawData[7];
 	// must read ST2 at end of data acquisition
 	imu_mpu9250_tread_mag(imu, 0x03, &rawData[0], sizeof(rawData));
+
+	if ((self->flags & BIT(IMU_MPU9250_MAG_SINGLE)) != 0) {
+		/* reload */
+		val = 0;
+		val |= BIT(4); /* 16-bit */
+		val |= BIT(0); /* mode single measurement */
+		imu_mpu9250_twrite_mag(imu, AK8963_CNTL1, &val, sizeof(val));
+	}
 
 	uint8_t st2 = rawData[6]; /* check for overflow */
 #if 1
@@ -571,7 +583,12 @@ static int imu_mpu9250_initialize(struct imu * imu)
 		imu_debug("Continuous measurement in 16bit\n");
 		val = 0;
 		val |= BIT(4); /* 16-bit */
-		val |= BIT(2)|BIT(1); /* continuous measurement mode 100 Hz */
+		if ((self->flags & BIT(IMU_MPU9250_MAG_SINGLE)) == 0) {
+			val |= BIT(2)|BIT(1); /* continuous measurement mode 100 Hz */
+		}
+		else {
+			val |= BIT(0); /* mode single measurement */
+		}
 		imu_mpu9250_twrite_mag(imu, AK8963_CNTL1, &val, sizeof(val));
 
 #if defined(IMU_MPU9250_MAGACCESS_AUTOMATIC)
